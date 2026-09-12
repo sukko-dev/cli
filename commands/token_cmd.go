@@ -3,6 +3,8 @@ package commands
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -19,6 +21,7 @@ var (
 
 var (
 	tokenSub       string
+	tokenKeyID     string
 	tokenTenant    string
 	tokenRoles     []string
 	tokenGroups    []string
@@ -45,6 +48,7 @@ func init() {
 	tokenGenerateCmd.Flags().DurationVar(&tokenTTL, "ttl", time.Hour, "Token time-to-live (e.g., 1h, 30m, 24h)")
 	tokenGenerateCmd.Flags().StringVar(&tokenKeyFile, "key-file", "", "Path to PEM private key")
 	tokenGenerateCmd.Flags().StringVar(&tokenAlgorithm, "algorithm", "", "Signing algorithm (ES256, RS256, EdDSA)")
+	tokenGenerateCmd.Flags().StringVar(&tokenKeyID, "key-id", "", "Registered signing-key id, emitted as the JWT kid header (defaults to the --key-file basename, which is how 'keys create' names stored keys)")
 
 	tokenValidateCmd.Flags().StringVar(&tokenKeyFile, "key-file", "", "Path to PEM public key (for signature verification)")
 
@@ -87,6 +91,8 @@ var tokenGenerateCmd = &cobra.Command{
 
 		tenant := resolveTenant(tokenTenant)
 
+		keyID := resolveKeyID(tokenKeyID, keyFile)
+
 		cfg := clitoken.GenerateConfig{
 			Subject:   tokenSub,
 			TenantID:  tenant,
@@ -96,6 +102,7 @@ var tokenGenerateCmd = &cobra.Command{
 			TTL:       tokenTTL,
 			KeyFile:   keyFile,
 			Algorithm: algorithm,
+			KeyID:     keyID,
 		}
 
 		tokenStr, jti, err := clitoken.Generate(cfg)
@@ -278,4 +285,16 @@ func parseExpires(raw string) (string, error) {
 		return t.Format(time.RFC3339), nil
 	}
 	return "", fmt.Errorf("invalid expires %q: must be a duration (e.g., 2h) or RFC3339 timestamp", raw)
+}
+
+// resolveKeyID picks the JWT `kid` for a generated token. The gateway finds a tenant's
+// public key by `kid`, so every token needs one. An explicit --key-id always wins;
+// otherwise fall back to the --key-file basename, because `keys create` stores a private
+// key as <keyID>.pem — for store-managed keys (including the auto-discovered one) the
+// basename IS the registered key id.
+func resolveKeyID(explicit, keyFile string) string {
+	if explicit != "" {
+		return explicit
+	}
+	return strings.TrimSuffix(filepath.Base(keyFile), filepath.Ext(keyFile))
 }

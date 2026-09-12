@@ -8,6 +8,7 @@ import (
 	"encoding/pem"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -62,6 +63,7 @@ func TestGenerateES256(t *testing.T) {
 				Subject:   "user123",
 				TenantID:  "acme",
 				Algorithm: "ES256",
+				KeyID:     "test-key",
 				KeyFile:   privPath,
 				TTL:       time.Hour,
 			},
@@ -75,6 +77,7 @@ func TestGenerateES256(t *testing.T) {
 				Roles:     []string{"admin", "editor"},
 				Groups:    []string{"team-a"},
 				Algorithm: "ES256",
+				KeyID:     "test-key",
 				KeyFile:   privPath,
 			},
 			wantSub: "admin",
@@ -123,6 +126,7 @@ func TestValidateWithKeyFile(t *testing.T) {
 		Subject:   "user",
 		TenantID:  "acme",
 		Algorithm: "ES256",
+		KeyID:     "test-key",
 		KeyFile:   privPath,
 		TTL:       time.Hour,
 	})
@@ -148,6 +152,7 @@ func TestValidateWithKeyFile_Tampered(t *testing.T) {
 	tokenStr, _, err := Generate(GenerateConfig{
 		Subject:   "user",
 		Algorithm: "ES256",
+		KeyID:     "test-key",
 		KeyFile:   privPath,
 		TTL:       time.Hour,
 	})
@@ -176,6 +181,7 @@ func TestDecodeExpiredToken(t *testing.T) {
 	tokenStr, _, err := Generate(GenerateConfig{
 		Subject:   "user",
 		Algorithm: "ES256",
+		KeyID:     "test-key",
 		KeyFile:   privPath,
 		TTL:       -time.Hour, // already expired
 	})
@@ -213,6 +219,7 @@ func TestGenerateNoKeyFile(t *testing.T) {
 	_, _, err := Generate(GenerateConfig{
 		Subject:   "user",
 		Algorithm: "ES256",
+		KeyID:     "test-key",
 	})
 	if err == nil {
 		t.Error("expected error without key file")
@@ -243,6 +250,7 @@ func TestGenerate_IncludesJTI(t *testing.T) {
 		Subject:   "user",
 		TenantID:  "acme",
 		Algorithm: "ES256",
+		KeyID:     "test-key",
 		KeyFile:   privPath,
 		TTL:       time.Hour,
 	})
@@ -273,6 +281,7 @@ func TestGenerate_ReturnsJTI(t *testing.T) {
 	tokenStr, jti, err := Generate(GenerateConfig{
 		Subject:   "user",
 		Algorithm: "ES256",
+		KeyID:     "test-key",
 		KeyFile:   privPath,
 	})
 	if err != nil {
@@ -287,5 +296,60 @@ func TestGenerate_ReturnsJTI(t *testing.T) {
 	claimJTI, _ := decoded.Claims["jti"].(string)
 	if claimJTI != jti {
 		t.Errorf("returned jti %q does not match claim jti %q", jti, claimJTI)
+	}
+}
+
+// TestGenerate_SetsKidHeader pins the kid header. The Sukko gateway resolves a tenant's
+// signing key by the token's `kid` and rejects a token without one ("missing kid header"),
+// so a generated token that omits it is unusable against every deployment — the header is
+// part of the contract, not an optional extra.
+func TestGenerate_SetsKidHeader(t *testing.T) {
+	t.Parallel()
+	privPath, _ := writeTestKeyPair(t)
+
+	tokenStr, _, err := Generate(GenerateConfig{
+		Subject:   "user-1",
+		TenantID:  "acme",
+		KeyFile:   privPath,
+		Algorithm: "ES256",
+		KeyID:     "signing-key-1",
+		TTL:       time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	decoded, err := Decode(tokenStr)
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	kid, ok := decoded.Header["kid"].(string)
+	if !ok {
+		t.Fatalf("header has no string kid; header = %v", decoded.Header)
+	}
+	if kid != "signing-key-1" {
+		t.Errorf("kid = %q, want %q", kid, "signing-key-1")
+	}
+}
+
+// TestGenerate_RequiresKeyID pins the loud failure. Emitting a kid-less token silently
+// produces credentials that fail only later, at the gateway, with an error that points at
+// the token rather than at the command that made it (§III: no silent failures).
+func TestGenerate_RequiresKeyID(t *testing.T) {
+	t.Parallel()
+	privPath, _ := writeTestKeyPair(t)
+
+	_, _, err := Generate(GenerateConfig{
+		Subject:   "user-1",
+		TenantID:  "acme",
+		KeyFile:   privPath,
+		Algorithm: "ES256",
+		// KeyID deliberately omitted.
+	})
+	if err == nil {
+		t.Fatal("Generate() with no KeyID returned nil error; want a key-id required error")
+	}
+	if !strings.Contains(err.Error(), "key id") {
+		t.Errorf("error = %q, want it to name the missing key id", err)
 	}
 }
