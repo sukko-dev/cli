@@ -19,6 +19,7 @@ var authKeyName string
 
 func init() {
 	authCmd.AddCommand(authKeygenCmd)
+	authCmd.AddCommand(authPubkeyCmd)
 	authCmd.AddCommand(authRegisterCmd)
 	authCmd.AddCommand(authRevokeCmd)
 	authCmd.AddCommand(authListCmd)
@@ -116,6 +117,26 @@ func ensureAdminKeypair(dir string) (created bool, pubBase64 string, err error) 
 	}
 
 	return true, pubBase64, nil
+}
+
+var authPubkeyCmd = &cobra.Command{
+	Use:   "pubkey",
+	Short: "Print the active context's admin public key",
+	Long: "Prints the base64 Ed25519 admin public key for the active context.\n\n" +
+		"This is the value the provisioning service must be booted with — " +
+		"ADMIN_BOOTSTRAP_KEY in Docker Compose, provisioning.adminBootstrapKey in Helm. " +
+		"`auth keygen` prints it once at creation and refuses to re-run, so use this to " +
+		"recover it later. The key is printed bare (no labels) so it can be piped:\n\n" +
+		"  ADMIN_BOOTSTRAP_KEY=\"$(sukko auth pubkey)\"",
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		pubPath := filepath.Join(resolveKeypairDir(), "admin.pub")
+		pubData, err := os.ReadFile(pubPath) //nolint:gosec // G304: path derived from context directory, not user input
+		if err != nil {
+			return fmt.Errorf("read public key %s: %w (run 'sukko auth keygen' first)", pubPath, err)
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), strings.TrimSpace(string(pubData)))
+		return nil
+	},
 }
 
 var authRegisterCmd = &cobra.Command{

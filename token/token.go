@@ -30,6 +30,11 @@ type GenerateConfig struct {
 	TTL       time.Duration
 	KeyFile   string // path to PEM private key
 	Algorithm string // ES256, RS256, EdDSA
+
+	// KeyID is the registered signing-key id, emitted as the JWT `kid` header.
+	// REQUIRED: the gateway resolves the tenant's public key by `kid` and rejects
+	// a token without one, so a kid-less token is unusable against any deployment.
+	KeyID string
 }
 
 // DecodedToken represents a decoded (but not necessarily verified) JWT.
@@ -48,6 +53,9 @@ func Generate(cfg GenerateConfig) (tokenStr, jti string, err error) {
 	}
 	if cfg.KeyFile == "" {
 		return "", "", errors.New("key file is required")
+	}
+	if cfg.KeyID == "" {
+		return "", "", errors.New("key id is required: it becomes the JWT kid header, which the gateway uses to find the tenant's signing key")
 	}
 	if cfg.TTL == 0 {
 		cfg.TTL = defaultTTL
@@ -84,6 +92,7 @@ func Generate(cfg GenerateConfig) (tokenStr, jti string, err error) {
 	}
 
 	token := jwt.NewWithClaims(method, claims)
+	token.Header["kid"] = cfg.KeyID
 
 	key, err := loadPrivateKey(cfg.KeyFile)
 	if err != nil {
