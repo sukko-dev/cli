@@ -1,0 +1,205 @@
+# golangci-lint configuration (v2)
+# https://golangci-lint.run/usage/configuration/
+# Run: golangci-lint run ./...
+
+version: "2"
+
+run:
+  # Timeout for analysis
+  timeout: 5m
+  # Include test files
+  tests: true
+  # Go version - matches go.mod
+  go: "1.26"
+
+linters:
+  # Start with no default linters, enable only what we need
+  default: none
+  enable:
+    # Default linters
+    - errcheck # Check for unchecked errors
+    - govet # Go vet checks
+    - ineffassign # Detects ineffectual assignments
+    - staticcheck # Staticcheck suite (includes gosimple, stylecheck)
+    - unused # Check for unused code
+
+    # Additional recommended linters
+    - bodyclose # Check HTTP response body is closed
+    - contextcheck # Check context.Context is passed correctly
+    - durationcheck # Check duration multiplications
+    - errorlint # Find code that will cause issues with Go 1.13+ error wrapping
+    - exhaustive # Check exhaustiveness of enum switch statements
+    - gocritic # Opinionated linter with many checks
+    - gosec # Security checks
+    - misspell # Check for spelling mistakes
+    - nilerr # Check for err != nil but returns nil
+    - noctx # Check for http requests without context
+    - prealloc # Find slice declarations that could be preallocated
+    - predeclared # Check for shadowing predeclared identifiers
+    - revive # Fast, configurable linter
+    - unconvert # Remove unnecessary conversions
+    - unparam # Report unused function parameters
+    - wastedassign # Find wasted assignment statements
+
+    # Code quality linters
+    - wrapcheck # Enforce error wrapping at package boundaries
+    - nolintlint # Require justification for //nolint directives
+
+    # Go modernization linters
+    - copyloopvar # Detects places where loop variables are copied
+    - intrange # Suggests use of integer range syntax (Go 1.22+)
+    - perfsprint # Check for fmt.Sprintf that can be replaced with string concat
+    - usestdlibvars # Detect when http/time constants can be used
+    - modernize # Suggests modern Go features
+
+  settings:
+    errcheck:
+      # Check for errors returned from type assertions
+      check-type-assertions: true
+      # Allow explicit _ = expr (intentional error discard)
+      check-blank: false
+
+    exhaustive:
+      # Check switch statements over enums
+      default-signifies-exhaustive: true
+
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-unused: false
+
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+      disabled-checks:
+        - hugeParam # Often not a concern in modern Go
+        - rangeValCopy # Go 1.22+ handles this
+
+    gosec:
+      excludes:
+        - G104 # Audit errors not checked (covered by errcheck)
+        - G307 # Deferring unsafe method (often false positive with Close)
+
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment # Too noisy for most codebases
+        - shadow # Covered by predeclared
+
+    misspell:
+      locale: US
+
+    prealloc:
+      simple: true
+      range-loops: true
+      for-loops: true
+
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: exported
+        - name: if-return
+        - name: increment-decrement
+        - name: var-naming
+        - name: var-declaration
+        - name: package-comments
+          disabled: true # Too strict for internal packages
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: indent-error-flow
+        - name: errorf
+        - name: empty-block
+        - name: superfluous-else
+        - name: unused-parameter
+          disabled: true # Covered by unparam
+        - name: unreachable-code
+        - name: redefines-builtin-id
+
+    staticcheck:
+      checks: ["all", "-ST1000", "-ST1003", "-ST1016"]
+
+    unparam:
+      check-exported: false
+
+    wrapcheck:
+      ignore-sigs:
+        - .Errorf(
+        - errors.New(
+        - errors.Unwrap(
+        - errors.Join(
+        - .Wrap(
+        - .Wrapf(
+        - .WithMessage(
+        - .WithMessagef(
+        - .WithStack(
+
+  exclusions:
+    rules:
+      # Exclude some linters from running on test files
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+          - unparam
+          - prealloc
+          - wrapcheck # Test errors don't need wrapping
+          - noctx # Test HTTP calls don't always need context
+
+      # Exclude some staticcheck checks in test files
+      - path: _test\.go
+        text: "SA1019" # Using deprecated function (often needed in tests)
+
+      # unusedwrite false positives in test fixtures
+      - path: _test\.go
+        linters:
+          - govet
+        text: "unusedwrite"
+
+      # CLI commands: cobra MarkFlagRequired/GetString errors are safe to ignore
+      - path: commands/
+        linters:
+          - errcheck
+
+      # Allow init functions in command packages
+      - path: commands/
+        linters:
+          - gochecknoinits
+
+      # Exclude lll issues for long lines with go:generate
+      - linters:
+          - lll
+        source: "^//go:generate "
+
+formatters:
+  enable:
+    - gofmt # Check code formatting
+    - goimports # Check imports formatting
+  settings:
+    gofmt:
+      simplify: true
+
+severity:
+  default: warning
+  rules:
+    - linters:
+        - gosec
+      severity: error
+    - linters:
+        - govet
+      severity: error
+    - linters:
+        - wrapcheck
+      severity: error
+    - linters:
+        - nolintlint
+      severity: error

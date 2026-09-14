@@ -1,0 +1,97 @@
+version: 2
+project_name: sukko
+
+before:
+  hooks:
+    - sh -c "go build -o /tmp/sukko-gen . && /tmp/sukko-gen completion bash > /tmp/sukko.bash && /tmp/sukko-gen completion zsh > /tmp/sukko.zsh && /tmp/sukko-gen completion fish > /tmp/sukko.fish"
+
+builds:
+  - id: sukko
+    main: .
+    binary: sukko
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X 'github.com/sukko-dev/cli/internal/version.Version={{.Version}}'
+      - -X 'github.com/sukko-dev/cli/internal/version.CommitHash={{.ShortCommit}}'
+      - -X 'github.com/sukko-dev/cli/internal/version.BuildTime={{.Date}}'
+
+archives:
+  - id: sukko
+    builds: [sukko]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
+  algorithm: sha256
+
+nfpms:
+  - id: sukko
+    builds: [sukko]
+    package_name: sukko
+    vendor: Sukko
+    homepage: https://github.com/sukko-dev/cli
+    maintainer: Sukko <contact@sukko.dev>
+    description: "Sukko WebSocket platform CLI"
+    license: Apache-2.0
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/bin
+    contents:
+      - src: /tmp/sukko.bash
+        dst: /usr/share/bash-completion/completions/sukko
+      - src: /tmp/sukko.zsh
+        dst: /usr/share/zsh/vendor-completions/_sukko
+      - src: /tmp/sukko.fish
+        dst: /usr/share/fish/vendor_completions.d/sukko.fish
+
+brews:
+  - repository:
+      owner: sukko-dev
+      name: homebrew-tap
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    ids: [sukko]
+    homepage: https://github.com/sukko-dev/cli
+    description: "Sukko WebSocket platform CLI"
+    license: Apache-2.0
+    install: |
+      bin.install "sukko"
+      generate_completions_from_executable(bin/"sukko", "completion")
+    test: |
+      system "#{bin}/sukko", "version"
+    skip_upload: auto
+
+scoops:
+  - repository:
+      owner: sukko-dev
+      name: scoop-bucket
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    ids: [sukko]
+    homepage: https://github.com/sukko-dev/cli
+    description: "Sukko WebSocket platform CLI"
+    license: Apache-2.0
+    skip_upload: auto
+
+release:
+  prerelease: auto
+  name_template: "{{.Tag}}"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^style:"
+      - "^chore:"

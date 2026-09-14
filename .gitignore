@@ -1,0 +1,45 @@
+# Go binary
+sukko
+sukko.exe
+sukko-cli
+
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Go coverage
+*.cover
+coverage.txt
+
+# GoReleaser
+dist/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+.env.debug
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Temporary files
+*.tmp
+*.bak
+tmp/
+temp/
+
+# Local dev environment
+.sukko/
+
+# Project docs (local only)
