@@ -333,7 +333,7 @@ func defaultChannelRules() map[string]any {
 func defaultCatchAllRules() map[string]any {
 	return map[string]any{
 		"rules": []map[string]any{
-			{"pattern": "**", "topics": []string{"default"}, "priority": 100},
+			{"pattern": "**", "ingress_topic": "default", "priority": 100},
 		},
 	}
 }

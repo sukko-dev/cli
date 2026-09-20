@@ -24,10 +24,11 @@ func init() {
 	routingDeleteCmd.Flags().String("tenant", "", "Tenant ID (uses active tenant from context if not set)")
 	routingAddCmd.Flags().String("tenant", "", "Tenant ID (uses active tenant from context if not set)")
 	routingAddCmd.Flags().String("pattern", "", "Channel pattern (e.g. trades.**, **)")
-	routingAddCmd.Flags().String("topics", "", "Comma-separated topic suffixes (e.g. trades,audit-log)")
+	routingAddCmd.Flags().String("ingress-topic", "", "Topic suffix the platform consumes and delivers for matching channels (e.g. trades)")
+	routingAddCmd.Flags().String("egress-topics", "", "Comma-separated topic suffixes that receive copies but are never delivered (Pro edition; e.g. audit,analytics)")
 	routingAddCmd.Flags().Int("priority", 0, "Rule priority (lower = higher precedence; must be unique per tenant)")
 	_ = routingAddCmd.MarkFlagRequired("pattern")
-	_ = routingAddCmd.MarkFlagRequired("topics")
+	_ = routingAddCmd.MarkFlagRequired("ingress-topic")
 	_ = routingAddCmd.MarkFlagRequired("priority")
 
 	// channels subcommands
@@ -141,12 +142,17 @@ var routingAddCmd = &cobra.Command{
 		}
 
 		pattern, _ := cmd.Flags().GetString("pattern")
-		topicsRaw, _ := cmd.Flags().GetString("topics")
+		ingressTopic, _ := cmd.Flags().GetString("ingress-topic")
+		egressRaw, _ := cmd.Flags().GetString("egress-topics")
 		priority, _ := cmd.Flags().GetInt("priority")
 
-		topics, err := parseTopics(topicsRaw)
-		if err != nil {
-			return err
+		var egressTopics []string
+		if egressRaw != "" {
+			var err error
+			egressTopics, err = parseTopics(egressRaw)
+			if err != nil {
+				return err
+			}
 		}
 
 		c, err := newClient()
@@ -155,9 +161,10 @@ var routingAddCmd = &cobra.Command{
 		}
 
 		result, err := c.AddRoutingRule(cmd.Context(), tenantID, client.RoutingRule{
-			Pattern:  pattern,
-			Topics:   topics,
-			Priority: priority,
+			Pattern:      pattern,
+			IngressTopic: ingressTopic,
+			EgressTopics: egressTopics,
+			Priority:     priority,
 		})
 		if err != nil {
 			switch {

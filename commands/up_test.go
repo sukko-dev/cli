@@ -25,14 +25,17 @@ func TestDefaultCatchAllRules(t *testing.T) {
 
 	rule := rules[0]
 
-	// Assert topics array is present and correct.
-	topicsRaw, ok := rule["topics"]
+	// Assert the ingress topic is present and correct (ADR-0018: routing rules
+	// carry one ingress topic, not a topics list).
+	ingressRaw, ok := rule["ingress_topic"]
 	if !ok {
-		t.Fatal("rule missing 'topics' key")
+		t.Fatal("rule missing 'ingress_topic' key")
 	}
-	topics, ok := topicsRaw.([]string)
-	if !ok || len(topics) != 1 || topics[0] != "default" {
-		t.Errorf("topics = %v, want [\"default\"]", topicsRaw)
+	if ingressRaw != "default" {
+		t.Errorf("ingress_topic = %v, want \"default\"", ingressRaw)
+	}
+	if _, hasOld := rule["topics"]; hasOld {
+		t.Errorf("rule still carries the removed 'topics' key: %v", rule)
 	}
 
 	// Assert priority is present and correct.
