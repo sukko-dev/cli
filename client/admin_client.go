@@ -223,9 +223,10 @@ func (c *AdminClient) DeleteRoutingRules(ctx context.Context, tenantID string) (
 
 // RoutingRule is the request body for AddRoutingRule.
 type RoutingRule struct {
-	Pattern  string   `json:"pattern"`
-	Topics   []string `json:"topics"`
-	Priority int      `json:"priority"`
+	Pattern      string   `json:"pattern"`
+	IngressTopic string   `json:"ingress_topic"`
+	EgressTopics []string `json:"egress_topics,omitempty"`
+	Priority     int      `json:"priority"`
 }
 
 // AddRoutingRule adds a single routing rule for a tenant via POST.

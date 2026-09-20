@@ -28,7 +28,8 @@ func TestRoutingAddCmd_Flags(t *testing.T) {
 	}{
 		{"tenant", false},
 		{"pattern", true},
-		{"topics", true},
+		{"ingress-topic", true},
+		{"egress-topics", false},
 		{"priority", true},
 	}
 

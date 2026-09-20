@@ -402,22 +402,24 @@ func TestAdminClient_AddRoutingRule(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name         string
-		serverStatus int
-		serverBody   string
-		wantErr      bool
-		wantSentinel error
-		wantMethod   string
-		wantPath     string
-		wantBodyKey  string // top-level key that must be present in the request body
+		name          string
+		serverStatus  int
+		serverBody    string
+		wantErr       bool
+		wantSentinel  error
+		wantMethod    string
+		wantPath      string
+		wantBodyKey   string // top-level key that must be present in the request body
+		wantRuleShape bool   // assert the inner rule uses ingress_topic/egress_topics, not topics
 	}{
 		{
-			name:         "sends POST to correct URL with rule envelope",
-			serverStatus: http.StatusCreated,
-			serverBody:   `{"rule":{"pattern":"trades.**","topics":["trades"],"priority":0}}`,
-			wantMethod:   "POST",
-			wantPath:     "/api/v1/tenants/demo/routing-rules",
-			wantBodyKey:  "rule",
+			name:          "sends POST to correct URL with rule envelope",
+			serverStatus:  http.StatusCreated,
+			serverBody:    `{"rule":{"pattern":"trades.**","ingress_topic":"trades","priority":0}}`,
+			wantMethod:    "POST",
+			wantPath:      "/api/v1/tenants/demo/routing-rules",
+			wantBodyKey:   "rule",
+			wantRuleShape: true,
 		},
 		{
 			name:         "409 ROUTING_RULE_DUPLICATE_PATTERN → typed error",
@@ -466,9 +468,10 @@ func TestAdminClient_AddRoutingRule(t *testing.T) {
 			c, _ := New(Config{BaseURL: srv.URL, Signer: testSigner(t)})
 
 			result, err := c.AddRoutingRule(context.Background(), "demo", RoutingRule{
-				Pattern:  "trades.**",
-				Topics:   []string{"trades"},
-				Priority: 0,
+				Pattern:      "trades.**",
+				IngressTopic: "trades",
+				EgressTopics: []string{"audit"},
+				Priority:     0,
 			})
 
 			if tt.wantErr {
@@ -493,6 +496,22 @@ func TestAdminClient_AddRoutingRule(t *testing.T) {
 			if tt.wantBodyKey != "" {
 				if _, ok := gotBody[tt.wantBodyKey]; !ok {
 					t.Errorf("request body missing key %q; got %v", tt.wantBodyKey, gotBody)
+				}
+			}
+			if tt.wantRuleShape {
+				rule, ok := gotBody["rule"].(map[string]any)
+				if !ok {
+					t.Fatalf("request body 'rule' is not an object; got %v", gotBody)
+				}
+				if rule["ingress_topic"] != "trades" {
+					t.Errorf("rule.ingress_topic = %v, want \"trades\"", rule["ingress_topic"])
+				}
+				if _, hasOld := rule["topics"]; hasOld {
+					t.Errorf("rule still sends the removed 'topics' field: %v", rule)
+				}
+				eg, ok := rule["egress_topics"].([]any)
+				if !ok || len(eg) != 1 || eg[0] != "audit" {
+					t.Errorf("rule.egress_topics = %v, want [audit]", rule["egress_topics"])
 				}
 			}
 			_ = result
