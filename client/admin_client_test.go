@@ -442,6 +442,20 @@ func TestAdminClient_AddRoutingRule(t *testing.T) {
 			wantErr:      true,
 			wantSentinel: ErrAPIBadRequest,
 		},
+		{
+			name:         "403 edition cap → forbidden (no longer silent success)",
+			serverStatus: http.StatusForbidden,
+			serverBody:   `{"code":"EDITION_LIMIT_ROUTING_RULES_PER_TENANT","message":"limit reached"}`,
+			wantErr:      true,
+			wantSentinel: ErrAPIForbidden,
+		},
+		{
+			name:         "400 validation → bad request (no longer silent success)",
+			serverStatus: http.StatusBadRequest,
+			serverBody:   `{"code":"ROUTING_RULE_VALIDATION_ERROR","message":"invalid"}`,
+			wantErr:      true,
+			wantSentinel: ErrAPIBadRequest,
+		},
 	}
 
 	for _, tt := range tests {

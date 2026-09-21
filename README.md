@@ -342,8 +342,8 @@ sukko rules routing get --tenant acme
 # Set from file
 sukko rules routing set --tenant acme --file routing.json
 
-# Add a single routing rule (all three flags required)
-sukko rules routing add --tenant acme --pattern "orders.**" --topics orders --priority 50
+# Add a single routing rule (--pattern, --ingress-topic, --priority required)
+sukko rules routing add --tenant acme --pattern "orders.**" --ingress-topic orders --priority 50
 
 # Delete routing rules
 sukko rules routing delete --tenant acme
@@ -354,10 +354,29 @@ Example `routing.json` (rules are evaluated in ascending priority order — lowe
 ```json
 {
   "rules": [
-    {"pattern": "orders.**", "topics": ["orders"], "priority": 50},
-    {"pattern": "**",        "topics": ["default"], "priority": 100}
+    {"pattern": "orders.**", "ingress_topic": "orders", "priority": 50},
+    {"pattern": "**",        "ingress_topic": "default", "priority": 100}
   ]
 }
+```
+
+### Topics
+
+Manage the tenant's provisioned topics. The deterministic `default` topic is
+always available and is listed first; it and `dead-letter` are reserved and
+cannot be created or deleted. The topic count is bounded by the tenant's
+`max_topics` quota (see `sukko quota`).
+
+```bash
+# List provisioned topics
+sukko topics list --tenant acme
+
+# Create a topic (suffix: lowercase alphanumeric and hyphens)
+sukko topics create --tenant acme --suffix analytics
+
+# Delete a topic — rejected if a routing rule still references it
+# (TOPIC_REFERENCED_BY_RULE); remove or update the rule first.
+sukko topics delete --tenant acme --suffix analytics
 ```
 
 ### Channel Permission Rules
