@@ -30,6 +30,11 @@ var (
 	// Routing rule conflict errors.
 	ErrDuplicateRoutingPattern  = errors.New("routing rule with this pattern already exists")
 	ErrDuplicateRoutingPriority = errors.New("routing rule with this priority already exists")
+
+	// Topic errors (ADR-0006 Phase 2).
+	ErrTopicAlreadyExists    = errors.New("topic already exists")
+	ErrTopicNotFound         = errors.New("topic not found")
+	ErrTopicReferencedByRule = errors.New("topic is referenced by a routing rule")
 )
 
 // AdminClient communicates with the provisioning REST API.
@@ -250,7 +255,73 @@ func (c *AdminClient) AddRoutingRule(ctx context.Context, tenantID string, rule 
 			return nil, fmt.Errorf("%w (code=%s)", ErrAPIBadRequest, code)
 		}
 	}
-	return resp, nil
+	if status >= 200 && status < 300 {
+		return resp, nil
+	}
+	// Any other non-2xx (400 validation, 403 edition cap, 5xx) was previously
+	// returned as success — doJSONFull hands 4xx/5xx back with a nil error so
+	// callers can classify. Route it through apiError so the failure surfaces.
+	return nil, apiError(status, resp)
+}
+
+// --- Topics (ADR-0006 Phase 2) ---
+
+// ListTopics retrieves a tenant's provisioned topics (the default topic is
+// always included first).
+func (c *AdminClient) ListTopics(ctx context.Context, tenantID string) (map[string]any, error) {
+	if err := requireTenantID(tenantID); err != nil {
+		return nil, err
+	}
+	return c.doJSON(ctx, "GET", tenantPath(tenantID, "topics"), nil)
+}
+
+// CreateTopic provisions a non-default topic for a tenant via POST.
+// Returns ErrTopicAlreadyExists on a 409 conflict.
+func (c *AdminClient) CreateTopic(ctx context.Context, tenantID, suffix string) (map[string]any, error) {
+	if err := requireTenantID(tenantID); err != nil {
+		return nil, err
+	}
+	if suffix == "" {
+		return nil, errors.New("topic suffix is required")
+	}
+	status, resp, err := c.doJSONFull(ctx, "POST", tenantPath(tenantID, "topics"), map[string]any{"suffix": suffix})
+	if err != nil {
+		return nil, err
+	}
+	if status >= 200 && status < 300 {
+		return resp, nil
+	}
+	if code, _ := resp["code"].(string); status == http.StatusConflict && code == "TOPIC_ALREADY_EXISTS" {
+		return nil, fmt.Errorf("%w", ErrTopicAlreadyExists)
+	}
+	return nil, apiError(status, resp)
+}
+
+// DeleteTopic removes a provisioned topic via DELETE. Returns ErrTopicNotFound
+// on a 404 and ErrTopicReferencedByRule when a routing rule still references it.
+func (c *AdminClient) DeleteTopic(ctx context.Context, tenantID, suffix string) (map[string]any, error) {
+	if err := requireTenantID(tenantID); err != nil {
+		return nil, err
+	}
+	if suffix == "" {
+		return nil, errors.New("topic suffix is required")
+	}
+	status, resp, err := c.doJSONFull(ctx, "DELETE", tenantPath(tenantID, "topics", url.PathEscape(suffix)), nil)
+	if err != nil {
+		return nil, err
+	}
+	if status >= 200 && status < 300 {
+		return resp, nil
+	}
+	code, _ := resp["code"].(string)
+	switch {
+	case status == http.StatusNotFound && code == "TOPIC_NOT_FOUND":
+		return nil, fmt.Errorf("%w", ErrTopicNotFound)
+	case status == http.StatusConflict && code == "TOPIC_REFERENCED_BY_RULE":
+		return nil, fmt.Errorf("%w", ErrTopicReferencedByRule)
+	default:
+		return nil, apiError(status, resp)
+	}
 }
 
 // --- Quotas ---
@@ -493,6 +564,33 @@ func (c *AdminClient) doJSON(ctx context.Context, method, path string, body any)
 	}
 
 	return result, nil
+}
+
+// apiError maps a non-2xx HTTP status and its parsed error body to a
+// sentinel-wrapped error, preferring the server's message then its code for
+// detail. Used by doJSONFull callers that special-case specific codes first.
+func apiError(status int, resp map[string]any) error {
+	code, _ := resp["code"].(string)
+	detail, _ := resp["message"].(string)
+	if detail == "" {
+		detail = code
+	}
+	switch {
+	case status == http.StatusUnauthorized:
+		return fmt.Errorf("%w: %s", ErrAPIUnauthorized, detail)
+	case status == http.StatusForbidden:
+		return fmt.Errorf("%w: %s", ErrAPIForbidden, detail)
+	case status == http.StatusNotFound:
+		return fmt.Errorf("%w: %s", ErrAPINotFound, detail)
+	case status == http.StatusConflict:
+		return fmt.Errorf("%w: %s", ErrAPIConflict, detail)
+	case status == http.StatusTooManyRequests:
+		return fmt.Errorf("%w: %s", ErrAPIRateLimited, detail)
+	case status >= 400 && status < 500:
+		return fmt.Errorf("%w (HTTP %d): %s", ErrAPIBadRequest, status, detail)
+	default:
+		return fmt.Errorf("%w (HTTP %d): %s", ErrAPIInternal, status, detail)
+	}
 }
 
 func encodeParams(params map[string]string) string {
