@@ -378,6 +378,83 @@ func (c *AdminClient) TestAccess(ctx context.Context, tenantID string, req map[s
 	return c.doJSON(ctx, "POST", tenantPath(tenantID, "test-access"), req)
 }
 
+// ─── Webhooks (operator-managed, Pro+; ADR-0033 on the server) ──────────────
+
+// CreateWebhookRequest is the request body for CreateWebhook.
+type CreateWebhookRequest struct {
+	URL            string `json:"url"`
+	ChannelPattern string `json:"channel_pattern"`
+	Secret         string `json:"secret"`
+	MaxRetries     int    `json:"max_retries,omitempty"`
+}
+
+func requireWebhookID(webhookID string) error {
+	if webhookID == "" {
+		return errors.New("webhook ID is required")
+	}
+	return nil
+}
+
+// ListWebhooks returns the tenant's webhook registrations.
+func (c *AdminClient) ListWebhooks(ctx context.Context, tenantID string) (map[string]any, error) {
+	if err := requireTenantID(tenantID); err != nil {
+		return nil, err
+	}
+	return c.doJSON(ctx, "GET", tenantPath(tenantID, "webhooks"), nil)
+}
+
+// GetWebhook returns a single webhook by ID.
+func (c *AdminClient) GetWebhook(ctx context.Context, tenantID, webhookID string) (map[string]any, error) {
+	if err := requireTenantID(tenantID); err != nil {
+		return nil, err
+	}
+	if err := requireWebhookID(webhookID); err != nil {
+		return nil, err
+	}
+	return c.doJSON(ctx, "GET", tenantPath(tenantID, "webhooks", webhookID), nil)
+}
+
+// CreateWebhook registers a webhook for the tenant.
+func (c *AdminClient) CreateWebhook(ctx context.Context, tenantID string, req CreateWebhookRequest) (map[string]any, error) {
+	if err := requireTenantID(tenantID); err != nil {
+		return nil, err
+	}
+	return c.doJSON(ctx, "POST", tenantPath(tenantID, "webhooks"), req)
+}
+
+// UpdateWebhook applies a partial update to a webhook. body carries only the fields to change.
+func (c *AdminClient) UpdateWebhook(ctx context.Context, tenantID, webhookID string, body map[string]any) (map[string]any, error) {
+	if err := requireTenantID(tenantID); err != nil {
+		return nil, err
+	}
+	if err := requireWebhookID(webhookID); err != nil {
+		return nil, err
+	}
+	return c.doJSON(ctx, "PATCH", tenantPath(tenantID, "webhooks", webhookID), body)
+}
+
+// DeleteWebhook removes a webhook registration.
+func (c *AdminClient) DeleteWebhook(ctx context.Context, tenantID, webhookID string) (map[string]any, error) {
+	if err := requireTenantID(tenantID); err != nil {
+		return nil, err
+	}
+	if err := requireWebhookID(webhookID); err != nil {
+		return nil, err
+	}
+	return c.doJSON(ctx, "DELETE", tenantPath(tenantID, "webhooks", webhookID), nil)
+}
+
+// TestWebhook performs a single synchronous test delivery to the webhook's URL.
+func (c *AdminClient) TestWebhook(ctx context.Context, tenantID, webhookID string) (map[string]any, error) {
+	if err := requireTenantID(tenantID); err != nil {
+		return nil, err
+	}
+	if err := requireWebhookID(webhookID); err != nil {
+		return nil, err
+	}
+	return c.doJSON(ctx, "POST", tenantPath(tenantID, "webhooks", webhookID, "test"), nil)
+}
+
 // --- Edition ---
 
 // EditionResponse represents the GET /edition response from the provisioning service.

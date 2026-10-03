@@ -292,6 +292,29 @@ sukko api-keys list --tenant acme
 sukko api-keys revoke --tenant acme --key-id <key-id>
 ```
 
+## Webhooks
+
+Webhook management is an operator action (Pro/Enterprise) — it authenticates with your admin keypair, like keys and routing rules. Webhooks deliver channel events to an external HTTPS endpoint, HMAC-signed with a shared secret.
+
+```bash
+# Register a webhook
+sukko webhook create --tenant acme --url https://acme.example.com/hook \
+  --channel-pattern "orders.*" --secret "$WEBHOOK_SECRET" --max-retries 5
+
+# List / inspect
+sukko webhook list --tenant acme
+sukko webhook get --tenant acme --webhook-id <webhook-id>
+
+# Update (only the flags you set change)
+sukko webhook update --tenant acme --webhook-id <webhook-id> --status suspended
+
+# Send a one-off test delivery
+sukko webhook test --tenant acme --webhook-id <webhook-id>
+
+# Delete
+sukko webhook delete --tenant acme --webhook-id <webhook-id>
+```
+
 ## Token Generation & Validation
 
 ```bash
