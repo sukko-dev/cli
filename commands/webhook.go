@@ -3,6 +3,8 @@ package commands
 import (
 	"errors"
 	"fmt"
+	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/sukko-dev/cli/client"
@@ -19,23 +21,23 @@ func init() {
 
 	webhookCreateCmd.Flags().String("url", "", "Destination URL (https required; http allowed only in local/dev)")
 	webhookCreateCmd.Flags().String("channel-pattern", "", "Channel pattern the webhook fires on (e.g. orders.*)")
-	webhookCreateCmd.Flags().String("secret", "", "HMAC signing secret shared with the destination")
+	webhookCreateCmd.Flags().String("secret", "", "HMAC signing secret (or use --secret-file to avoid argv exposure)")
+	webhookCreateCmd.Flags().String("secret-file", "", "Path to a file containing the HMAC signing secret")
 	webhookCreateCmd.Flags().Int("max-retries", 0, "Max delivery retries (0 = provisioning default)")
 	_ = webhookCreateCmd.MarkFlagRequired("url")
 	_ = webhookCreateCmd.MarkFlagRequired("channel-pattern")
-	_ = webhookCreateCmd.MarkFlagRequired("secret")
 
 	for _, c := range []*cobra.Command{webhookGetCmd, webhookUpdateCmd, webhookDeleteCmd, webhookTestCmd} {
-		c.Flags().String("id", "", "Webhook ID (required)")
-		_ = c.MarkFlagRequired("id")
+		c.Flags().String("webhook-id", "", "Webhook ID (required)")
+		_ = c.MarkFlagRequired("webhook-id")
 	}
 
-	// update is a partial PATCH — only the flags the operator sets are sent.
+	// update is a partial PATCH — only the flags the operator sets are sent. The server's PATCH has
+	// no secret field: rotating a webhook secret requires delete + recreate.
 	webhookUpdateCmd.Flags().String("url", "", "New destination URL")
 	webhookUpdateCmd.Flags().String("channel-pattern", "", "New channel pattern")
-	webhookUpdateCmd.Flags().String("secret", "", "New HMAC signing secret")
-	webhookUpdateCmd.Flags().Int("max-retries", 0, "New max delivery retries")
-	webhookUpdateCmd.Flags().String("status", "", "New status (enabled|degraded|suspended)")
+	webhookUpdateCmd.Flags().Int("max-retries", 0, "New max delivery retries (1–10)")
+	webhookUpdateCmd.Flags().String("status", "", "New status (enabled|suspended)")
 }
 
 var webhookCmd = &cobra.Command{
@@ -58,7 +60,10 @@ var webhookCreateCmd = &cobra.Command{
 		}
 		url, _ := cmd.Flags().GetString("url")
 		pattern, _ := cmd.Flags().GetString("channel-pattern")
-		secret, _ := cmd.Flags().GetString("secret")
+		secret, err := resolveWebhookSecret(cmd)
+		if err != nil {
+			return err
+		}
 		maxRetries, _ := cmd.Flags().GetInt("max-retries")
 
 		c, err := newClient()
@@ -106,7 +111,7 @@ var webhookGetCmd = &cobra.Command{
 		if tenantID == "" {
 			return errors.New("tenant ID required (use --tenant or set active tenant in context)")
 		}
-		id, _ := cmd.Flags().GetString("id")
+		id, _ := cmd.Flags().GetString("webhook-id")
 		c, err := newClient()
 		if err != nil {
 			return err
@@ -127,12 +132,12 @@ var webhookUpdateCmd = &cobra.Command{
 		if tenantID == "" {
 			return errors.New("tenant ID required (use --tenant or set active tenant in context)")
 		}
-		id, _ := cmd.Flags().GetString("id")
+		id, _ := cmd.Flags().GetString("webhook-id")
 
 		// Partial update: send only the fields the operator actually set.
 		body := webhookUpdateBody(cmd)
 		if len(body) == 0 {
-			return errors.New("nothing to update: set at least one of --url, --channel-pattern, --secret, --max-retries, --status")
+			return errors.New("nothing to update: set at least one of --url, --channel-pattern, --max-retries, --status")
 		}
 
 		c, err := newClient()
@@ -155,7 +160,7 @@ var webhookDeleteCmd = &cobra.Command{
 		if tenantID == "" {
 			return errors.New("tenant ID required (use --tenant or set active tenant in context)")
 		}
-		id, _ := cmd.Flags().GetString("id")
+		id, _ := cmd.Flags().GetString("webhook-id")
 		c, err := newClient()
 		if err != nil {
 			return err
@@ -176,7 +181,7 @@ var webhookTestCmd = &cobra.Command{
 		if tenantID == "" {
 			return errors.New("tenant ID required (use --tenant or set active tenant in context)")
 		}
-		id, _ := cmd.Flags().GetString("id")
+		id, _ := cmd.Flags().GetString("webhook-id")
 		c, err := newClient()
 		if err != nil {
 			return err
@@ -187,6 +192,32 @@ var webhookTestCmd = &cobra.Command{
 		}
 		return printOutput(result, output)
 	},
+}
+
+// resolveWebhookSecret reads the HMAC signing secret from --secret or --secret-file (exactly one
+// required). --secret-file keeps the secret out of argv/shell history; --secret is convenient for
+// scripts that inject it via an environment variable.
+func resolveWebhookSecret(cmd *cobra.Command) (string, error) {
+	secret, _ := cmd.Flags().GetString("secret")
+	secretFile, _ := cmd.Flags().GetString("secret-file")
+	switch {
+	case secret != "" && secretFile != "":
+		return "", errors.New("--secret and --secret-file are mutually exclusive")
+	case secretFile != "":
+		data, err := os.ReadFile(secretFile) //nolint:gosec // G304: CLI reads user-specified file path from --secret-file
+		if err != nil {
+			return "", fmt.Errorf("read secret file: %w", err)
+		}
+		s := strings.TrimSpace(string(data))
+		if s == "" {
+			return "", fmt.Errorf("secret file %s is empty", secretFile)
+		}
+		return s, nil
+	case secret != "":
+		return secret, nil
+	default:
+		return "", errors.New("a webhook secret is required (use --secret or --secret-file)")
+	}
 }
 
 // webhookUpdateBody builds the PATCH body for `webhook update` from only the flags the operator
@@ -201,10 +232,6 @@ func webhookUpdateBody(cmd *cobra.Command) map[string]any {
 	if cmd.Flags().Changed("channel-pattern") {
 		v, _ := cmd.Flags().GetString("channel-pattern")
 		body["channel_pattern"] = v
-	}
-	if cmd.Flags().Changed("secret") {
-		v, _ := cmd.Flags().GetString("secret")
-		body["secret"] = v
 	}
 	if cmd.Flags().Changed("max-retries") {
 		v, _ := cmd.Flags().GetInt("max-retries")

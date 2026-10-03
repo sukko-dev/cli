@@ -113,6 +113,9 @@ func TestAdminClient_Webhooks_Guards(t *testing.T) {
 	if _, err := c.GetWebhook(ctx, "demo", ""); err == nil {
 		t.Error("GetWebhook(demo, \"\") = nil error, want webhook-ID-required error")
 	}
+	if _, err := c.UpdateWebhook(ctx, "demo", "", map[string]any{"status": "suspended"}); err == nil {
+		t.Error("UpdateWebhook(demo, \"\") = nil error, want webhook-ID-required error")
+	}
 	if _, err := c.DeleteWebhook(ctx, "demo", ""); err == nil {
 		t.Error("DeleteWebhook(demo, \"\") = nil error, want webhook-ID-required error")
 	}

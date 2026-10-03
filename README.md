@@ -303,16 +303,16 @@ sukko webhook create --tenant acme --url https://acme.example.com/hook \
 
 # List / inspect
 sukko webhook list --tenant acme
-sukko webhook get --tenant acme --id <webhook-id>
+sukko webhook get --tenant acme --webhook-id <webhook-id>
 
 # Update (only the flags you set change)
-sukko webhook update --tenant acme --id <webhook-id> --status suspended
+sukko webhook update --tenant acme --webhook-id <webhook-id> --status suspended
 
 # Send a one-off test delivery
-sukko webhook test --tenant acme --id <webhook-id>
+sukko webhook test --tenant acme --webhook-id <webhook-id>
 
 # Delete
-sukko webhook delete --tenant acme --id <webhook-id>
+sukko webhook delete --tenant acme --webhook-id <webhook-id>
 ```
 
 ## Token Generation & Validation
