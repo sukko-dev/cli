@@ -46,6 +46,8 @@ func TestWebhookCmd_Flags(t *testing.T) {
 		{webhookUpdateCmd, "channel-pattern", false},
 		{webhookUpdateCmd, "max-retries", false},
 		{webhookUpdateCmd, "status", false},
+		{webhookUpdateCmd, "secret", false},
+		{webhookUpdateCmd, "secret-file", false},
 	}
 
 	for _, tt := range tests {
@@ -166,6 +168,47 @@ func TestResolveWebhookSecret(t *testing.T) {
 		t.Parallel()
 		if _, err := resolveWebhookSecret(newCreateCmd()); err == nil {
 			t.Error("want error when no secret is provided")
+		}
+	})
+}
+
+// TestResolveWebhookSecretOptional covers the update-path resolver: neither flag set is NOT an
+// error (no rotation), exactly one resolves, and both set is rejected.
+func TestResolveWebhookSecretOptional(t *testing.T) {
+	t.Parallel()
+
+	newCmd := func() *cobra.Command {
+		c := &cobra.Command{Use: "update", RunE: func(*cobra.Command, []string) error { return nil }}
+		c.Flags().String("secret", "", "")
+		c.Flags().String("secret-file", "", "")
+		return c
+	}
+
+	t.Run("neither set → not provided, no error", func(t *testing.T) {
+		t.Parallel()
+		got, provided, err := resolveWebhookSecretOptional(newCmd())
+		if err != nil || provided || got != "" {
+			t.Fatalf("got (%q, %v, %v), want (\"\", false, nil)", got, provided, err)
+		}
+	})
+
+	t.Run("--secret → provided", func(t *testing.T) {
+		t.Parallel()
+		c := newCmd()
+		_ = c.Flags().Set("secret", "rot")
+		got, provided, err := resolveWebhookSecretOptional(c)
+		if err != nil || !provided || got != "rot" {
+			t.Fatalf("got (%q, %v, %v), want (\"rot\", true, nil)", got, provided, err)
+		}
+	})
+
+	t.Run("both set → error", func(t *testing.T) {
+		t.Parallel()
+		c := newCmd()
+		_ = c.Flags().Set("secret", "a")
+		_ = c.Flags().Set("secret-file", "/x")
+		if _, _, err := resolveWebhookSecretOptional(c); err == nil {
+			t.Error("want error when both --secret and --secret-file are set")
 		}
 	})
 }
