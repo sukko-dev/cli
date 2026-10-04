@@ -222,24 +222,24 @@ func resolveWebhookSecret(cmd *cobra.Command) (string, error) {
 // It returns (secret, true, nil) when exactly one flag is set, ("", false, nil) when neither is
 // set (the caller decides whether that is an error — create requires one, update treats it as
 // "no rotation"), and an error when both are set or the file is unreadable/empty.
-func resolveWebhookSecretOptional(cmd *cobra.Command) (string, bool, error) {
-	secret, _ := cmd.Flags().GetString("secret")
+func resolveWebhookSecretOptional(cmd *cobra.Command) (secret string, provided bool, err error) {
+	flagSecret, _ := cmd.Flags().GetString("secret")
 	secretFile, _ := cmd.Flags().GetString("secret-file")
 	switch {
-	case secret != "" && secretFile != "":
+	case flagSecret != "" && secretFile != "":
 		return "", false, errors.New("--secret and --secret-file are mutually exclusive")
 	case secretFile != "":
-		data, err := os.ReadFile(secretFile) //nolint:gosec // G304: CLI reads user-specified file path from --secret-file
-		if err != nil {
-			return "", false, fmt.Errorf("read secret file: %w", err)
+		data, readErr := os.ReadFile(secretFile) //nolint:gosec // G304: CLI reads user-specified file path from --secret-file
+		if readErr != nil {
+			return "", false, fmt.Errorf("read secret file: %w", readErr)
 		}
 		s := strings.TrimSpace(string(data))
 		if s == "" {
 			return "", false, fmt.Errorf("secret file %s is empty", secretFile)
 		}
 		return s, true, nil
-	case secret != "":
-		return secret, true, nil
+	case flagSecret != "":
+		return flagSecret, true, nil
 	default:
 		return "", false, nil
 	}
