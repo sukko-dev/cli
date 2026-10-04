@@ -32,12 +32,14 @@ func init() {
 		_ = c.MarkFlagRequired("webhook-id")
 	}
 
-	// update is a partial PATCH — only the flags the operator sets are sent. The server's PATCH has
-	// no secret field: rotating a webhook secret requires delete + recreate.
+	// update is a partial PATCH — only the flags the operator sets are sent. --secret (or
+	// --secret-file) rotates the HMAC signing secret in place, keeping the webhook ID and history.
 	webhookUpdateCmd.Flags().String("url", "", "New destination URL")
 	webhookUpdateCmd.Flags().String("channel-pattern", "", "New channel pattern")
 	webhookUpdateCmd.Flags().Int("max-retries", 0, "New max delivery retries (1–10)")
 	webhookUpdateCmd.Flags().String("status", "", "New status (enabled|suspended)")
+	webhookUpdateCmd.Flags().String("secret", "", "Rotate the HMAC signing secret (or use --secret-file)")
+	webhookUpdateCmd.Flags().String("secret-file", "", "Rotate the HMAC signing secret, read from a file (keeps it out of argv)")
 }
 
 var webhookCmd = &cobra.Command{
@@ -136,8 +138,16 @@ var webhookUpdateCmd = &cobra.Command{
 
 		// Partial update: send only the fields the operator actually set.
 		body := webhookUpdateBody(cmd)
+		// A secret rotation is optional on update: include it only when provided.
+		secret, provided, err := resolveWebhookSecretOptional(cmd)
+		if err != nil {
+			return err
+		}
+		if provided {
+			body["secret"] = secret
+		}
 		if len(body) == 0 {
-			return errors.New("nothing to update: set at least one of --url, --channel-pattern, --max-retries, --status")
+			return errors.New("nothing to update: set at least one of --url, --channel-pattern, --max-retries, --status, --secret")
 		}
 
 		c, err := newClient()
@@ -198,25 +208,40 @@ var webhookTestCmd = &cobra.Command{
 // required). --secret-file keeps the secret out of argv/shell history; --secret is convenient for
 // scripts that inject it via an environment variable.
 func resolveWebhookSecret(cmd *cobra.Command) (string, error) {
-	secret, _ := cmd.Flags().GetString("secret")
+	s, ok, err := resolveWebhookSecretOptional(cmd)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", errors.New("a webhook secret is required (use --secret or --secret-file)")
+	}
+	return s, nil
+}
+
+// resolveWebhookSecretOptional resolves --secret/--secret-file when the operator provided one.
+// It returns (secret, true, nil) when exactly one flag is set, ("", false, nil) when neither is
+// set (the caller decides whether that is an error — create requires one, update treats it as
+// "no rotation"), and an error when both are set or the file is unreadable/empty.
+func resolveWebhookSecretOptional(cmd *cobra.Command) (secret string, provided bool, err error) {
+	flagSecret, _ := cmd.Flags().GetString("secret")
 	secretFile, _ := cmd.Flags().GetString("secret-file")
 	switch {
-	case secret != "" && secretFile != "":
-		return "", errors.New("--secret and --secret-file are mutually exclusive")
+	case flagSecret != "" && secretFile != "":
+		return "", false, errors.New("--secret and --secret-file are mutually exclusive")
 	case secretFile != "":
-		data, err := os.ReadFile(secretFile) //nolint:gosec // G304: CLI reads user-specified file path from --secret-file
-		if err != nil {
-			return "", fmt.Errorf("read secret file: %w", err)
+		data, readErr := os.ReadFile(secretFile) //nolint:gosec // G304: CLI reads user-specified file path from --secret-file
+		if readErr != nil {
+			return "", false, fmt.Errorf("read secret file: %w", readErr)
 		}
 		s := strings.TrimSpace(string(data))
 		if s == "" {
-			return "", fmt.Errorf("secret file %s is empty", secretFile)
+			return "", false, fmt.Errorf("secret file %s is empty", secretFile)
 		}
-		return s, nil
-	case secret != "":
-		return secret, nil
+		return s, true, nil
+	case flagSecret != "":
+		return flagSecret, true, nil
 	default:
-		return "", errors.New("a webhook secret is required (use --secret or --secret-file)")
+		return "", false, nil
 	}
 }
 
