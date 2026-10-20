@@ -210,6 +210,35 @@ func TestPushAction(t *testing.T) {
 	}
 }
 
+// TestReloadPushAction pins that a deferred (pending_restart) reload never drives a
+// push transition — the live edition is unchanged (ADR-0039), so a deferred Pro→Community
+// downgrade must NOT stop push-service — while any other status delegates to pushAction.
+func TestReloadPushAction(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		status string
+		prev   string
+		next   string
+		want   pushOrchestration
+	}{
+		{"deferred downgrade does not stop push", licenseStatusPendingRestart, "pro", "community", pushNone},
+		{"deferred does not start push", licenseStatusPendingRestart, "community", "pro", pushNone},
+		{"active downgrade stops push", "active", "pro", "community", pushStop},
+		{"active upgrade starts push", "active", "community", "pro", pushStart},
+		{"legacy empty status delegates to pushAction", "", "community", "pro", pushStart},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := reloadPushAction(tt.status, tt.prev, tt.next); got != tt.want {
+				t.Errorf("reloadPushAction(%q, %q, %q) = %v, want %v", tt.status, tt.prev, tt.next, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseExpiry(t *testing.T) {
 	t.Parallel()
 

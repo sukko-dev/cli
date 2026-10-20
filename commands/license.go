@@ -31,6 +31,12 @@ const (
 	editionEnterprise = "enterprise"
 )
 
+// licenseStatusPendingRestart is the `status` the provisioning reload API returns when
+// a key is accepted but LOWERS the edition or capacity: it is persisted and broadcast
+// but does not change the running deployment, taking effect only at the next restart
+// (ADR-0039). Any other status (e.g. "active") means it took effect live.
+const licenseStatusPendingRestart = "pending_restart"
+
 // pushComposeProfiles activates the push-service in the embedded compose file.
 // The profile keeps its historical "enterprise" name even though push-service
 // now boots with a Pro license (Web Push) — renaming is deferred until the
@@ -69,6 +75,17 @@ func pushAction(prevEdition, newEdition string) pushOrchestration {
 	default:
 		return pushNone
 	}
+}
+
+// reloadPushAction decides push orchestration for a reload outcome. A deferred
+// (pending_restart) reload does not change the live edition (ADR-0039), so it never
+// triggers a push transition regardless of the key's pending edition; otherwise it is
+// the ordinary pushAction transition from the previous edition to the new one.
+func reloadPushAction(status, prevEdition, newEdition string) pushOrchestration {
+	if status == licenseStatusPendingRestart {
+		return pushNone
+	}
+	return pushAction(prevEdition, newEdition)
 }
 
 // licenseClaims represents the decoded payload of a license key.
@@ -156,7 +173,7 @@ func runLicenseSet(cmd *cobra.Command, args []string) error {
 	// Warn if expired
 	if claims.Exp > 0 && time.Unix(claims.Exp, 0).Before(time.Now()) {
 		fmt.Fprintf(cmd.ErrOrStderr(),
-			"Warning: this license appears to be expired (%s). The platform will run as Community edition.\n",
+			"Warning: this license appears to be expired (%s). A running server keeps its current edition, but the platform refuses to start with an expired key — it will not come back up after a restart until you supply a valid one.\n",
 			time.Unix(claims.Exp, 0).Format("2006-01-02"))
 	}
 
@@ -331,14 +348,27 @@ func runLicensePush(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("push license: %w", err)
 	}
 
-	// 7. Report success
-	fmt.Fprintf(cmd.OutOrStdout(), "License applied. Edition: %s, Org: %s, Expires: %s\n",
-		capitalizeEdition(resp.Edition), resp.Org, formatExpiry(parseExpiry(resp.ExpiresAt)))
+	// 7. Report outcome. A `pending_restart` status means the key LOWERS the edition
+	// or capacity: the server accepted, persisted, and broadcast it, but the running
+	// deployment keeps its current license until it restarts (ADR-0039). The live
+	// edition is unchanged in that case, so no push-service transition happens now —
+	// orchestration is reconciled at the next 'sukko up'.
+	deferred := resp.Status == licenseStatusPendingRestart
+	if deferred {
+		fmt.Fprintf(cmd.OutOrStdout(), "License accepted — takes effect at the next restart. Pending edition: %s, Org: %s, Expires: %s\n",
+			capitalizeEdition(resp.Edition), resp.Org, formatExpiry(parseExpiry(resp.ExpiresAt)))
+		fmt.Fprintln(cmd.OutOrStdout(), "It lowers the edition or capacity, so the running deployment keeps its current license (and push-service) until you restart it with 'sukko up'.")
+	} else {
+		fmt.Fprintf(cmd.OutOrStdout(), "License applied. Edition: %s, Org: %s, Expires: %s\n",
+			capitalizeEdition(resp.Edition), resp.Org, formatExpiry(parseExpiry(resp.ExpiresAt)))
+	}
 
 	// 8. Compose orchestration — local contexts only. Push-service is
-	// Pro+ (Web Push); FCM/APNs delivery additionally requires Enterprise.
+	// Pro+ (Web Push); FCM/APNs delivery additionally requires Enterprise. A deferred
+	// reload changes nothing live, so it drives no push transition (reloadPushAction
+	// returns pushNone) and prints no K8s start hint for the pending edition.
 	if resolvedCtx == nil || resolvedCtx.Type != "local" {
-		if editionSupportsPush(resp.Edition) {
+		if !deferred && editionSupportsPush(resp.Edition) {
 			fmt.Fprintln(cmd.OutOrStdout(), "To start push-service in K8s: helm upgrade --set push-service.enabled=true")
 		}
 		return nil
@@ -350,7 +380,7 @@ func runLicensePush(cmd *cobra.Command, args []string) error {
 		prevEditionStr = prevEdition.Edition
 	}
 
-	action := pushAction(prevEditionStr, resp.Edition)
+	action := reloadPushAction(resp.Status, prevEditionStr, resp.Edition)
 	if action == pushNone {
 		return nil
 	}
