@@ -38,6 +38,10 @@ Download from [Releases](https://github.com/sukko-dev/cli/releases). Available f
 # Initialize a local context (stores server URLs and credentials)
 sukko init
 
+# Set your license key — every edition requires one, Community included.
+# Grab a free Community key from your dashboard at https://sukko.dev
+sukko license set
+
 # Start local development stack (Docker Compose)
 sukko up
 
@@ -520,7 +524,7 @@ Suites are dynamically fetched from the tester. Tab completion works when the te
 | `provisioning` | Provisioning API validation |
 | `sse` | SSE transport delivery (Pro+) |
 | `rest-publish` | REST publish endpoint delivery |
-| `push` | Web Push / FCM / APNs registration and delivery (Pro+ for Web Push; FCM/APNs delivery needs Enterprise) |
+| `push` | Web Push registration and delivery (Pro+). Native mobile push (FCM/APNs) is planned. |
 | `license-reload` | License hot-reload behavior |
 | `token-revocation` | Token/session revocation enforcement |
 | `kafka-ingest` | Direct-to-Kafka ingestion (requires `--kafka-brokers`) |
@@ -579,7 +583,7 @@ The full data path — Kafka/Redpanda backend, message history, live gap recover
 | Admin UI | - | Yes | Yes |
 | Web Push | - | Yes | Yes |
 | Push Analytics | - | Yes | Yes |
-| Mobile Push (FCM/APNs) | - | - | Yes |
+| Mobile Push (FCM/APNs) | - | - | Planned |
 | Audit Logging | - | - | Yes |
 
 ### License Management
@@ -598,11 +602,11 @@ sukko license show
 sukko license remove
 ```
 
-License keys are encrypted at rest. The key is automatically passed to services on `sukko up`.
+A license key is **required for every edition**, Community included — services refuse to start without one. Get a free Community key from your dashboard at [sukko.dev](https://sukko.dev). License keys are encrypted at rest, and the key is automatically passed to services on `sukko up`.
 
 ### Push Notifications Upgrade
 
-Push a Pro or Enterprise license to a running deployment to enable push notifications. Web Push (VAPID) is available from Pro; FCM/APNs delivery additionally requires Enterprise:
+Push a Pro license to a running deployment to enable Web Push notifications (VAPID), available from Pro. Native mobile push (FCM/APNs) is planned:
 
 ```bash
 # Push a Pro or Enterprise license — push-service starts automatically (local dev)
