@@ -6,6 +6,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -77,15 +78,9 @@ var keysCreateCmd = &cobra.Command{
 			return fmt.Errorf("read public key file: %w", err)
 		}
 
-		req := map[string]any{
-			"algorithm":  algorithm,
-			"public_key": string(pubKey),
-		}
-		if keyID != "" {
-			req["key_id"] = keyID
-		}
-		if expiresAt != "" {
-			req["expires_at"] = expiresAt
+		req, _, err := buildCreateKeyRequest(algorithm, string(pubKey), keyID, expiresAt)
+		if err != nil {
+			return err
 		}
 
 		c, err := newClient()
@@ -114,29 +109,21 @@ func runKeysGenerate(cmd *cobra.Command, tenantID string) error {
 	}
 	pubPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
 
-	// Register public key with provisioning
-	keyID, _ := cmd.Flags().GetString("key-id")
-	req := map[string]any{
-		"algorithm":  "ES256",
-		"public_key": string(pubPEM),
-	}
-	if keyID != "" {
-		req["key_id"] = keyID
+	// Register public key with provisioning. The CLI owns the key_id — the server requires
+	// it and uses it as the globally-unique JWT kid — defaulting to a generated one when
+	// --key-id is omitted.
+	keyIDFlag, _ := cmd.Flags().GetString("key-id")
+	req, keyID, err := buildCreateKeyRequest("ES256", string(pubPEM), keyIDFlag, "")
+	if err != nil {
+		return err
 	}
 
 	c, err := newClient()
 	if err != nil {
 		return fmt.Errorf("create client: %w", err)
 	}
-	result, err := c.CreateKey(cmd.Context(), tenantID, req)
-	if err != nil {
+	if _, err := c.CreateKey(cmd.Context(), tenantID, req); err != nil {
 		return fmt.Errorf("register public key: %w", err)
-	}
-
-	// Extract key ID from response
-	registeredKeyID, _ := result["key_id"].(string)
-	if registeredKeyID == "" {
-		registeredKeyID = "generated"
 	}
 
 	// Marshal private key to PEM
@@ -146,19 +133,54 @@ func runKeysGenerate(cmd *cobra.Command, tenantID string) error {
 	}
 	privPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: privBytes})
 
-	// Save private key
-	if err := savePrivateKey(tenantID, registeredKeyID, privPEM); err != nil {
+	// Save the private key named after the key_id we registered, so `token generate`
+	// auto-discovers it and derives the matching kid from the filename.
+	if err := savePrivateKey(tenantID, keyID, privPEM); err != nil {
 		return fmt.Errorf("save private key: %w", err)
 	}
 
 	path, _ := keysDir(tenantID)
 	fmt.Fprintf(cmd.OutOrStdout(), "Key pair generated.\n")
-	fmt.Fprintf(cmd.OutOrStdout(), "  Public key registered as %q for tenant %q\n", registeredKeyID, tenantID)
-	fmt.Fprintf(cmd.OutOrStdout(), "  Private key saved to %s/%s.pem\n", path, registeredKeyID)
+	fmt.Fprintf(cmd.OutOrStdout(), "  Public key registered as %q for tenant %q\n", keyID, tenantID)
+	fmt.Fprintf(cmd.OutOrStdout(), "  Private key saved to %s/%s.pem\n", path, keyID)
 	fmt.Fprintln(cmd.OutOrStdout(), "\nGenerate a token with:")
 	fmt.Fprintf(cmd.OutOrStdout(), "  sukko token generate --tenant %s --sub <user-id>\n", tenantID)
 
 	return nil
+}
+
+// generateKeyID mints a default signing-key id when the operator supplies none. It
+// satisfies the provisioning CreateKeyRequest contract — 3-63 chars, starting with a
+// lowercase letter, lowercase alphanumerics or hyphens — as `key-` plus 16 hex characters
+// (8 random bytes = 64 bits, so collisions are negligible for a globally-unique id).
+func generateKeyID() (string, error) {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("read random bytes: %w", err)
+	}
+	return "key-" + hex.EncodeToString(b), nil
+}
+
+// buildCreateKeyRequest assembles the provisioning CreateKey body and returns it alongside
+// the effective key_id. key_id is required by the server (it is the globally-unique JWT
+// kid), so an empty keyID is defaulted to a generated one rather than omitted. Returning
+// the id lets the caller name the saved private key after it without relying on the server
+// echoing it back. Extracted so key_test.go can assert the schema without a network call.
+func buildCreateKeyRequest(algorithm, publicKeyPEM, keyID, expiresAt string) (body map[string]any, effectiveKeyID string, err error) {
+	if keyID == "" {
+		if keyID, err = generateKeyID(); err != nil {
+			return nil, "", err
+		}
+	}
+	req := map[string]any{
+		"algorithm":  algorithm,
+		"public_key": publicKeyPEM,
+		"key_id":     keyID,
+	}
+	if expiresAt != "" {
+		req["expires_at"] = expiresAt
+	}
+	return req, keyID, nil
 }
 
 // --- Key storage helpers ---
