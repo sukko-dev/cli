@@ -112,6 +112,18 @@ func newCLI(t *testing.T) *cli {
 	return &cli{t: t, dir: dir, home: home, env: env}
 }
 
+// sub returns a shallow copy of c bound to the subtest t. A cli's failure helpers call
+// c.t.Fatalf, so a cli built in a parent test (e.g. via bootCommunityStack) would FailNow
+// the PARENT from inside a t.Run — aborting the remaining subtests. Calling `c = c.sub(t)`
+// at the top of each subtest rebinds failures to that subtest, so subtests sharing one
+// booted stack stay independent. The stack (dir, home, env) is shared by design.
+func (c *cli) sub(t *testing.T) *cli {
+	t.Helper()
+	cp := *c
+	cp.t = t
+	return &cp
+}
+
 // run execs `sukko <args...>` with a default timeout and fails the test if it exits
 // non-zero. It returns the combined stdout+stderr for assertions.
 func (c *cli) run(args ...string) string {
