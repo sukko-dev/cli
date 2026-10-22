@@ -38,9 +38,10 @@ Download from [Releases](https://github.com/sukko-dev/cli/releases). Available f
 # Initialize a local context (stores server URLs and credentials)
 sukko init
 
-# Set your license key — every edition requires one, Community included.
-# Grab a free Community key from your dashboard at https://sukko.dev
-sukko license set
+# Fetch your license key — every edition requires one, Community included.
+# 'login' shows a short code to approve in your browser (no license key to paste);
+# or paste a key you already have with 'license set'.
+sukko license login
 
 # Start local development stack (Docker Compose)
 sukko up
@@ -589,20 +590,23 @@ The full data path — Kafka/Redpanda backend, message history, live gap recover
 ### License Management
 
 ```bash
-# Store a license key (prompts for input to avoid shell history)
-sukko license set
+# Log in to your Sukko account and fetch your license key: the CLI shows a short
+# code to approve in your browser — no license key to copy-paste. The recommended
+# path, especially for a free Community key.
+sukko license login
 
-# Store via argument
+# Or store a key you already have (prompts for input to avoid shell history)
+sukko license set
 sukko license set <key>
 
 # View stored license info (key masked)
 sukko license show
 
-# Remove stored license
+# Remove the stored license ('sukko license logout' is an alias)
 sukko license remove
 ```
 
-A license key is **required for every edition**, Community included — services refuse to start without one. Get a free Community key from your dashboard at [sukko.dev](https://sukko.dev). License keys are encrypted at rest, and the key is automatically passed to services on `sukko up`.
+A license key is **required for every edition**, Community included — services refuse to start without one. Run `sukko license login` to fetch yours in the browser, or `sukko license set` to paste one you already have from [sukko.dev](https://sukko.dev). License keys are encrypted at rest, and the key is automatically passed to services on `sukko up`.
 
 ### Push Notifications Upgrade
 
@@ -712,7 +716,7 @@ sukko completion fish > ~/.config/fish/completions/sukko.fish
 | `sukko quota` | Manage tenant quotas |
 | `sukko edition` | Show current edition, limits, and resource usage |
 | `sukko edition compare` | Compare Community, Pro, and Enterprise editions |
-| `sukko license` | Store, view, and remove license keys |
+| `sukko license` | Fetch (`login`), store, view, and remove license keys |
 | `sukko health` | Check service health with troubleshooting tips |
 | `sukko status` | Show platform status |
 | `sukko test` | Run smoke, load, stress, soak, and validation tests |

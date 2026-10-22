@@ -22,7 +22,7 @@ func init() {
 var licenseCmd = &cobra.Command{
 	Use:   "license",
 	Short: "Manage Sukko license key",
-	Long:  "Store, view, and remove the Sukko license key from the CLI context.",
+	Long:  "Fetch (login), store, view, and remove the Sukko license key in the CLI context.",
 }
 
 // Edition identifiers as reported by provisioning's /edition and license endpoints.
