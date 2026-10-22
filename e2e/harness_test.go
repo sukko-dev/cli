@@ -141,14 +141,17 @@ func (c *cli) up(args ...string) string {
 	return out
 }
 
-// bootCommunityStack initializes a project, sets the dev Community license, and boots the
-// stack, registering `down -v` teardown. It returns the ready cli and the `sukko up`
-// output (so callers can assert on it). The boot path lives here so every suite shares
-// it; each suite still gets its own isolated project/HOME via newCLI.
-func bootCommunityStack(t *testing.T) (*cli, string) {
+// bootStack initializes a project, sets licenseKey, and boots the stack, registering
+// `down -v` teardown. It returns the ready cli and the `sukko up` output (so callers can
+// assert on it). The boot path lives here so every suite shares it; each suite still gets
+// its own isolated project/HOME via newCLI. It skips when licenseKey is empty — the
+// edition suites skip the editions run.sh did not mint.
+func bootStack(t *testing.T, licenseKey string) (*cli, string) {
 	t.Helper()
 	requireDocker(t)
-	requireLicenseKey(t)
+	if strings.TrimSpace(licenseKey) == "" {
+		t.Skip("no license key for this edition — run via e2e/run.sh (mints community/pro/enterprise)")
+	}
 	c := newCLI(t)
 	t.Cleanup(func() {
 		if out, err := c.runErr("down", "-v"); err != nil {
@@ -156,8 +159,14 @@ func bootCommunityStack(t *testing.T) (*cli, string) {
 		}
 	})
 	c.run("init", "--defaults")
-	c.run("license", "set", os.Getenv("SUKKO_LICENSE_KEY"))
+	c.run("license", "set", licenseKey)
 	return c, c.up()
+}
+
+// bootCommunityStack boots the default dev Community stack (SUKKO_LICENSE_KEY from run.sh).
+func bootCommunityStack(t *testing.T) (*cli, string) {
+	t.Helper()
+	return bootStack(t, os.Getenv("SUKKO_LICENSE_KEY"))
 }
 
 // runCtx is the core exec: it applies a timeout, the isolated HOME/env, and returns the
@@ -185,15 +194,6 @@ const (
 	defaultTimeout = 90 * time.Second
 	upTimeout      = 5 * time.Minute
 )
-
-// requireLicenseKey skips the test if run.sh did not export a minted key — the suite is
-// meaningless without a signature-valid license for the sukko_e2e stack.
-func requireLicenseKey(t *testing.T) {
-	t.Helper()
-	if strings.TrimSpace(os.Getenv("SUKKO_LICENSE_KEY")) == "" {
-		t.Skip("SUKKO_LICENSE_KEY not set — run via e2e/run.sh (mints a dev key)")
-	}
-}
 
 // requireDocker skips the test if the Docker daemon is not reachable.
 func requireDocker(t *testing.T) {
