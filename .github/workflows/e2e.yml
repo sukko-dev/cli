@@ -1,0 +1,54 @@
+name: CLI E2E
+
+# Hermetic end-to-end suite: builds the platform from a sukko source checkout with the
+# `sukko_e2e` build tag (embeds a dev license-signing key), boots a real docker-compose
+# stack via `sukko up`, and drives the sukko binary. It is Docker-heavy (several minutes
+# of image builds), and the regressions it is best at catching come from PLATFORM changes
+# in sukko-dev/sukko — which a cli pull_request would never see. So it runs nightly against
+# sukko main and on demand, NOT on every PR. A PR labeled `run-e2e` opts in (e.g. when the
+# change touches the suite itself). The fast CI gate (go vet + go test -race) excludes this
+# build-tagged suite by design.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * *" # ~06:00 UTC daily, against sukko main
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cli-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: Lifecycle (hermetic)
+    # On a PR, run only when explicitly labeled `run-e2e`; dispatch and the nightly
+    # schedule always run.
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-e2e')
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout cli
+        uses: actions/checkout@v4
+
+      # The suite builds the platform images from source; e2e/run.sh resolves the sukko
+      # checkout at .sources/sukko. Public repo — no token needed.
+      - name: Checkout sukko source
+        uses: actions/checkout@v4
+        with:
+          repository: sukko-dev/sukko
+          path: .sources/sukko
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # ubuntu-latest ships Docker; e2e/run.sh does genkeys → build sukko_e2e images →
+      # mint a dev Community key → boot the stack → run the suite → tear down.
+      - name: Run CLI e2e
+        run: bash e2e/run.sh
