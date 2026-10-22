@@ -104,6 +104,10 @@ func newCLI(t *testing.T) *cli {
 		"XDG_CONFIG_HOME="+filepath.Join(home, ".config"),
 		"DOCKER_CONFIG="+dockerConfig,
 		"COMPOSE_PROJECT_NAME="+project,
+		// `sukko test` authenticates to the in-stack tester with SUKKO_TESTER_TOKEN; the
+		// embedded compose fixes the tester's token to this dev default, so a local
+		// `sukko test` needs it set — the e2e mirrors that.
+		"SUKKO_TESTER_TOKEN=sukko-dev-token",
 	)
 	return &cli{t: t, dir: dir, home: home, env: env}
 }
@@ -135,6 +139,25 @@ func (c *cli) up(args ...string) string {
 		c.t.Fatalf("sukko up failed: %v\n%s", err, out)
 	}
 	return out
+}
+
+// bootCommunityStack initializes a project, sets the dev Community license, and boots the
+// stack, registering `down -v` teardown. It returns the ready cli and the `sukko up`
+// output (so callers can assert on it). The boot path lives here so every suite shares
+// it; each suite still gets its own isolated project/HOME via newCLI.
+func bootCommunityStack(t *testing.T) (*cli, string) {
+	t.Helper()
+	requireDocker(t)
+	requireLicenseKey(t)
+	c := newCLI(t)
+	t.Cleanup(func() {
+		if out, err := c.runErr("down", "-v"); err != nil {
+			t.Logf("sukko down -v (cleanup) failed: %v\n%s", err, out)
+		}
+	})
+	c.run("init", "--defaults")
+	c.run("license", "set", os.Getenv("SUKKO_LICENSE_KEY"))
+	return c, c.up()
 }
 
 // runCtx is the core exec: it applies a timeout, the isolated HOME/env, and returns the
