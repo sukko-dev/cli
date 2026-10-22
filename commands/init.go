@@ -51,6 +51,11 @@ type ProjectConfig struct {
 	Tracing           bool   `json:"tracing,omitempty"`
 	Profiling         bool   `json:"profiling,omitempty"`
 	CredentialsEncKey string `json:"credentials_encryption_key,omitempty"` // auto-generated 32-byte hex key for provisioning
+	// WebhookInternalToken is the provisioning↔webhook-worker shared secret. Required by
+	// Pro/Enterprise editions (webhooks are Pro+), so provisioning fatals at boot without
+	// it. Auto-generated here (local dev-only, like CredentialsEncKey) so `sukko up` boots
+	// a Pro/Enterprise stack out of the box.
+	WebhookInternalToken string `json:"webhook_internal_token,omitempty"`
 }
 
 // loadProjectConfig reads and unmarshals .sukko/config.json.
@@ -82,6 +87,16 @@ a local context with dev credentials. Run 'sukko up' to start services.`,
 	RunE: runInit,
 }
 
+// randomHexToken returns 32 cryptographically-random bytes as a hex string, used for the
+// auto-generated local dev secrets.
+func randomHexToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("read random bytes: %w", err)
+	}
+	return hex.EncodeToString(b), nil
+}
+
 func runInit(cmd *cobra.Command, _ []string) error {
 	// Generate 32-byte credentials encryption key for provisioning
 	keyBytes := make([]byte, 32)
@@ -89,11 +104,18 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("generate credentials encryption key: %w", err)
 	}
 
+	// Generate the provisioning↔webhook-worker shared secret (Pro/Enterprise require it).
+	webhookToken, err := randomHexToken()
+	if err != nil {
+		return fmt.Errorf("generate webhook internal token: %w", err)
+	}
+
 	cfg := ProjectConfig{
-		Database:          "postgres",
-		Broadcast:         "valkey",
-		MessageBackend:    "direct",
-		CredentialsEncKey: hex.EncodeToString(keyBytes),
+		Database:             "postgres",
+		Broadcast:            "valkey",
+		MessageBackend:       "direct",
+		CredentialsEncKey:    hex.EncodeToString(keyBytes),
+		WebhookInternalToken: webhookToken,
 	}
 
 	if !useDefaults {

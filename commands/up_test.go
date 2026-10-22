@@ -8,6 +8,30 @@ import (
 	"testing"
 )
 
+func TestResolveWebhookToken(t *testing.T) {
+	t.Parallel()
+
+	// A persisted token (from `sukko init`) is returned verbatim.
+	if got := resolveWebhookToken(ProjectConfig{WebhookInternalToken: "persisted-token"}); got != "persisted-token" {
+		t.Errorf("resolveWebhookToken(persisted) = %q, want persisted-token", got)
+	}
+
+	// An empty config (e.g. created before the field existed) still yields a non-empty
+	// ephemeral token, so a Pro/Enterprise stack boots rather than fatally requiring
+	// WEBHOOK_INTERNAL_TOKEN.
+	a := resolveWebhookToken(ProjectConfig{})
+	b := resolveWebhookToken(ProjectConfig{})
+	if a == "" || b == "" {
+		t.Fatal("resolveWebhookToken(empty) returned an empty token — Pro/Enterprise would fail to boot")
+	}
+	if len(a) != 64 {
+		t.Errorf("ephemeral token length = %d, want 64 hex chars (32 bytes)", len(a))
+	}
+	if a == b {
+		t.Error("ephemeral tokens should differ between calls")
+	}
+}
+
 func TestDefaultCatchAllRules(t *testing.T) {
 	t.Parallel()
 

@@ -92,6 +92,12 @@ func runUp(cmd *cobra.Command, _ []string) error {
 		envOverrides["CREDENTIALS_ENCRYPTION_KEY"] = cfg.CredentialsEncKey
 	}
 
+	// Provisioning↔webhook-worker shared secret — Pro/Enterprise require it (provisioning
+	// fatals at boot otherwise).
+	if webhookToken := resolveWebhookToken(cfg); webhookToken != "" {
+		envOverrides["WEBHOOK_INTERNAL_TOKEN"] = webhookToken
+	}
+
 	// Admin bootstrap key — provisioning registers this on first startup for JWT auth
 	adminPubKey := loadAdminPublicKey()
 	if adminPubKey != "" {
@@ -175,6 +181,20 @@ func runUp(cmd *cobra.Command, _ []string) error {
 	}
 
 	return nil
+}
+
+// resolveWebhookToken returns the provisioning↔webhook-worker shared secret for the local
+// stack: the init-persisted token when present, otherwise a freshly generated ephemeral
+// one (so a Pro/Enterprise stack created before the token field existed still boots). The
+// token only needs to be consistent across the services within a single `sukko up`.
+func resolveWebhookToken(cfg ProjectConfig) string {
+	if cfg.WebhookInternalToken != "" {
+		return cfg.WebhookInternalToken
+	}
+	if tok, err := randomHexToken(); err == nil {
+		return tok
+	}
+	return ""
 }
 
 // resolveEffectiveLicenseKey returns the license key that compose's ${SUKKO_LICENSE_KEY:-}
