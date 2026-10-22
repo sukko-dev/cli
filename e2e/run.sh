@@ -53,15 +53,20 @@ build_img server       ghcr.io/sukko-dev/sukko-server:latest
 build_img gateway      ghcr.io/sukko-dev/sukko-gateway:latest
 build_img tester       ghcr.io/sukko-dev/sukko-tester:latest
 
-# --- 3. mint a dev Community license (signed by the regenerated dev key) ---------------
-echo "==> minting dev Community license"
-SUKKO_LICENSE_KEY="$(
-  cd "$SUKKO_DIR/ws" && go run ./internal/shared/license/gentoken \
-    --key internal/shared/license/keys/sukko.dev.key \
-    --edition community --org 'E2E' --expires +1y
-)"
-export SUKKO_LICENSE_KEY
-if [ -z "$SUKKO_LICENSE_KEY" ]; then
+# --- 3. mint dev licenses (signed by the regenerated dev key), one per edition ---------
+mint() { # <edition> <org>
+  ( cd "$SUKKO_DIR/ws" && go run ./internal/shared/license/gentoken \
+      --key internal/shared/license/keys/sukko.dev.key \
+      --edition "$1" --org "$2" --expires +1y )
+}
+echo "==> minting dev licenses (community, pro, enterprise)"
+# SUKKO_LICENSE_KEY is the default the Community suites use. The per-edition keys let the
+# edition suites boot a stack at Pro / Enterprise.
+SUKKO_LICENSE_KEY="$(mint community 'E2E')"
+SUKKO_E2E_PRO_KEY="$(mint pro 'E2E Pro')"
+SUKKO_E2E_ENT_KEY="$(mint enterprise 'E2E Enterprise')"
+export SUKKO_LICENSE_KEY SUKKO_E2E_PRO_KEY SUKKO_E2E_ENT_KEY
+if [ -z "$SUKKO_LICENSE_KEY" ] || [ -z "$SUKKO_E2E_PRO_KEY" ] || [ -z "$SUKKO_E2E_ENT_KEY" ]; then
   echo "ERROR: gentoken produced an empty license" >&2
   exit 1
 fi
