@@ -158,13 +158,13 @@ func (c *cli) up(args ...string) string {
 // assert on it). The boot path lives here so every suite shares it; each suite still gets
 // its own isolated project/HOME via newCLI. It skips when licenseKey is empty — the
 // edition suites skip the editions run.sh did not mint.
-func bootStack(t *testing.T, licenseKey string) (*cli, string) {
+func bootStack(t *testing.T, licenseKey string) (c *cli, upOut string) {
 	t.Helper()
 	requireDocker(t)
 	if strings.TrimSpace(licenseKey) == "" {
 		t.Skip("no license key for this edition — run via e2e/run.sh (mints community/pro/enterprise)")
 	}
-	c := newCLI(t)
+	c = newCLI(t)
 	t.Cleanup(func() {
 		if out, err := c.runErr("down", "-v"); err != nil {
 			t.Logf("sukko down -v (cleanup) failed: %v\n%s", err, out)
@@ -172,11 +172,12 @@ func bootStack(t *testing.T, licenseKey string) (*cli, string) {
 	})
 	c.run("init", "--defaults")
 	c.run("license", "set", licenseKey)
-	return c, c.up()
+	upOut = c.up()
+	return c, upOut
 }
 
 // bootCommunityStack boots the default dev Community stack (SUKKO_LICENSE_KEY from run.sh).
-func bootCommunityStack(t *testing.T) (*cli, string) {
+func bootCommunityStack(t *testing.T) (c *cli, upOut string) {
 	t.Helper()
 	return bootStack(t, os.Getenv("SUKKO_LICENSE_KEY"))
 }
