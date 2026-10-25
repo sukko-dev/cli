@@ -169,6 +169,20 @@ func (m *Manager) Logs(ctx context.Context, services []string, follow bool) erro
 	return nil
 }
 
+// RecentLogs captures (not streams) the recent combined logs of all services, for diagnosing a
+// boot failure. Best-effort: it returns whatever docker produced even on a non-zero exit, so a
+// caller can scan the output for a fatal line regardless of the exit code.
+func (m *Manager) RecentLogs(ctx context.Context) (string, error) {
+	args := m.composeArgs()
+	args = append(args, "logs", "--no-color", "--tail", defaultLogTailLines)
+
+	cmd := exec.CommandContext(ctx, "docker", args...) //nolint:gosec // G204: args built from fixed strings
+	cmd.Dir = m.projectDir
+
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
 // IsRunning returns true if the Docker Compose project has running services.
 func (m *Manager) IsRunning(ctx context.Context) bool {
 	args := m.composeArgs()
