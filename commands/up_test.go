@@ -4,9 +4,13 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	clicontext "github.com/sukko-dev/cli/context"
 )
 
 func TestResolveWebhookToken(t *testing.T) {
@@ -427,4 +431,177 @@ func TestExplainBootFailure(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestLocalStackContext verifies that a local-stack command resolves the LOCAL context
+// regardless of which context is active — the guarantee that keeps `sukko up` from
+// provisioning a remote/prod stack — and reports when a remote context is active.
+func TestLocalStackContext(t *testing.T) {
+	// Not parallel: mutates package-level resolvedStore/resolvedCtx.
+	store, err := clicontext.NewStoreWithDir(t.TempDir() + "/contexts")
+	if err != nil {
+		t.Fatalf("NewStoreWithDir: %v", err)
+	}
+	local := &clicontext.Context{Name: "local", Type: clicontext.TypeLocal, ProvisioningURL: "http://localhost:18080"}
+	remote := &clicontext.Context{Name: "prod", Type: clicontext.TypeRemote, ProvisioningURL: "https://api.example.com"}
+	for _, c := range []*clicontext.Context{local, remote} {
+		if err := store.Add(c); err != nil {
+			t.Fatalf("seed %s: %v", c.Name, err)
+		}
+	}
+
+	origStore, origCtx := resolvedStore, resolvedCtx
+	t.Cleanup(func() { resolvedStore, resolvedCtx = origStore, origCtx })
+
+	t.Run("no store errors", func(t *testing.T) {
+		resolvedStore, resolvedCtx = nil, nil
+		if _, _, err := localStackContext(); err == nil {
+			t.Error("expected error with no store")
+		}
+	})
+
+	t.Run("resolves local when a remote context is active", func(t *testing.T) {
+		resolvedStore, resolvedCtx = store, remote
+		got, activeIsRemote, err := localStackContext()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got == nil || got.Name != "local" {
+			t.Errorf("want the local context, got %+v", got)
+		}
+		if !activeIsRemote {
+			t.Error("activeIsRemote should be true when a remote context is active")
+		}
+	})
+
+	t.Run("local active is not flagged remote", func(t *testing.T) {
+		resolvedStore, resolvedCtx = store, local
+		got, activeIsRemote, err := localStackContext()
+		if err != nil || got == nil || got.Name != "local" {
+			t.Fatalf("want local context, got %+v err %v", got, err)
+		}
+		if activeIsRemote {
+			t.Error("activeIsRemote should be false when the local context is active")
+		}
+	})
+
+	t.Run("no active context still resolves local, not flagged", func(t *testing.T) {
+		resolvedStore, resolvedCtx = store, nil
+		got, activeIsRemote, err := localStackContext()
+		if err != nil || got == nil || got.Name != "local" {
+			t.Fatalf("want local context, got %+v err %v", got, err)
+		}
+		if activeIsRemote {
+			t.Error("activeIsRemote should be false when no context is active")
+		}
+	})
+
+	t.Run("no local context errors", func(t *testing.T) {
+		emptyStore, err := clicontext.NewStoreWithDir(t.TempDir() + "/empty")
+		if err != nil {
+			t.Fatalf("NewStoreWithDir: %v", err)
+		}
+		resolvedStore, resolvedCtx = emptyStore, remote
+		if _, _, err := localStackContext(); err == nil {
+			t.Error("expected error when no local context exists")
+		}
+	})
+}
+
+// TestUseLocalStackContext proves that pointing a local-stack command at the local stack
+// actually reassigns the globals the rest of runUp reads: the provisioning URL and admin key
+// path resolve to the local context even when a remote context is active, a note is printed,
+// and a non-loopback --api-url override is refused (it must not redirect `up` off-box).
+func TestUseLocalStackContext(t *testing.T) {
+	// Not parallel: mutates package-level globals (resolvedStore/resolvedCtx/apiURL).
+	store, err := clicontext.NewStoreWithDir(t.TempDir() + "/contexts")
+	if err != nil {
+		t.Fatalf("NewStoreWithDir: %v", err)
+	}
+	local := &clicontext.Context{Name: "local", Type: clicontext.TypeLocal, ProvisioningURL: "http://localhost:18080"}
+	remote := &clicontext.Context{Name: "prod", Type: clicontext.TypeRemote, ProvisioningURL: "https://api.example.com"}
+	for _, c := range []*clicontext.Context{local, remote} {
+		if err := store.Add(c); err != nil {
+			t.Fatalf("seed %s: %v", c.Name, err)
+		}
+	}
+	// A file at <store>/local/admin.key so resolveAdminKeyPath resolves to the local key.
+	if err := os.MkdirAll(filepath.Join(store.Dir(), "local"), 0o755); err != nil {
+		t.Fatalf("mkdir local key dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(store.Dir(), "local", "admin.key"), []byte("x"), 0o600); err != nil {
+		t.Fatalf("seed admin key: %v", err)
+	}
+
+	origStore, origCtx, origAPI := resolvedStore, resolvedCtx, apiURL
+	t.Cleanup(func() { resolvedStore, resolvedCtx, apiURL = origStore, origCtx, origAPI })
+
+	t.Run("reassigns globals to local when a remote context is active", func(t *testing.T) {
+		resolvedStore, resolvedCtx, apiURL = store, remote, ""
+		var buf bytes.Buffer
+		if err := useLocalStackContext(&buf); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if resolvedCtx == nil || resolvedCtx.Name != "local" {
+			t.Fatalf("resolvedCtx should be the local context, got %+v", resolvedCtx)
+		}
+		if got := resolveProvisioningURL(); got != "http://localhost:18080" {
+			t.Errorf("provisioning URL = %q, want the local URL", got)
+		}
+		if got := resolveAdminKeyPath(); !strings.HasSuffix(got, filepath.Join("local", "admin.key")) {
+			t.Errorf("admin key path = %q, want it under the local context dir", got)
+		}
+		if !strings.Contains(buf.String(), "not the local context") {
+			t.Errorf("expected a note about the active context, got %q", buf.String())
+		}
+	})
+
+	t.Run("refuses a non-loopback --api-url override", func(t *testing.T) {
+		resolvedStore, resolvedCtx, apiURL = store, local, "https://api.prod.example"
+		err := useLocalStackContext(&bytes.Buffer{})
+		if err == nil || !strings.Contains(err.Error(), "--api-url") {
+			t.Errorf("non-loopback --api-url should be refused, got %v", err)
+		}
+	})
+
+	t.Run("allows a loopback --api-url override", func(t *testing.T) {
+		resolvedStore, resolvedCtx, apiURL = store, local, "http://localhost:19999"
+		if err := useLocalStackContext(&bytes.Buffer{}); err != nil {
+			t.Errorf("loopback --api-url should be allowed, got %v", err)
+		}
+	})
+}
+
+// TestLocalStackProbeURLs verifies status probes the local context (or loopback defaults),
+// never the active context.
+func TestLocalStackProbeURLs(t *testing.T) {
+	store, err := clicontext.NewStoreWithDir(t.TempDir() + "/contexts")
+	if err != nil {
+		t.Fatalf("NewStoreWithDir: %v", err)
+	}
+	local := &clicontext.Context{Name: "local", Type: clicontext.TypeLocal, ProvisioningURL: "http://localhost:18080", GatewayURL: "ws://localhost:13000"}
+	remote := &clicontext.Context{Name: "prod", Type: clicontext.TypeRemote, ProvisioningURL: "https://api.example.com", GatewayURL: "wss://ws.example.com"}
+	for _, c := range []*clicontext.Context{local, remote} {
+		if err := store.Add(c); err != nil {
+			t.Fatalf("seed %s: %v", c.Name, err)
+		}
+	}
+	origStore, origCtx := resolvedStore, resolvedCtx
+	t.Cleanup(func() { resolvedStore, resolvedCtx = origStore, origCtx })
+
+	t.Run("remote active still probes local URLs", func(t *testing.T) {
+		resolvedStore, resolvedCtx = store, remote
+		prov, gw, _ := localStackProbeURLs()
+		if prov != "http://localhost:18080" || gw != "http://localhost:13000" {
+			t.Errorf("probe URLs = %q,%q; want the local context's, not prod", prov, gw)
+		}
+	})
+
+	t.Run("no store falls back to defaults", func(t *testing.T) {
+		resolvedStore, resolvedCtx = nil, nil
+		prov, _, _ := localStackProbeURLs()
+		if prov != defaultAPIURL {
+			t.Errorf("probe prov URL = %q, want default %q", prov, defaultAPIURL)
+		}
+	})
 }

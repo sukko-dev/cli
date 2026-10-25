@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/sukko-dev/cli/client"
 	"github.com/sukko-dev/cli/compose"
+	clicontext "github.com/sukko-dev/cli/context"
 )
 
 const healthTimeout = 120 * time.Second
@@ -76,10 +77,14 @@ func runUp(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	// Verify credentials are available before starting services
-	if resolvedCtx == nil {
-		return errors.New("no active context found — run 'sukko init' first")
+	// `sukko up` operates the LOCAL Docker Compose stack, so it must provision the local
+	// stack regardless of which context is active or any endpoint override — never the
+	// operator's remote/prod stack.
+	if err := useLocalStackContext(cmd.ErrOrStderr()); err != nil {
+		return err
 	}
+
+	// Verify credentials are available before starting services
 	if _, _, err := resolveProvisioningConfig(); err != nil {
 		fmt.Fprintln(cmd.ErrOrStderr(), "Hint: run 'sukko init' to set up admin keypair")
 		return fmt.Errorf("resolve credentials: %w", err)
@@ -295,6 +300,44 @@ func classifyProvisionError(err error) provisionOutcome {
 	}
 }
 
+// localStackContext resolves the context a local-stack command (up) must operate against:
+// always the local context, never the active one, so switching to a remote/prod context
+// cannot redirect `sukko up`'s provisioning off-box. activeIsRemote reports whether a
+// different, non-local context is currently active (for a one-line note to the operator).
+func localStackContext() (local *clicontext.Context, activeIsRemote bool, err error) {
+	if resolvedStore == nil {
+		return nil, false, errors.New("no context store — run 'sukko init' first")
+	}
+	local, err = resolvedStore.FindLocalContext()
+	if err != nil {
+		return nil, false, fmt.Errorf("resolve local context: %w", err)
+	}
+	if local == nil {
+		return nil, false, errors.New("no local context found — run 'sukko init' first")
+	}
+	return local, resolvedCtx != nil && !resolvedCtx.IsLocal(), nil
+}
+
+// useLocalStackContext points a local-stack command (up) at the LOCAL stack: it resolves the
+// local context, refuses a non-loopback --api-url override (a local-stack command must not be
+// redirected off-box), notes to w when a different context is active, and reassigns the
+// active-context globals so every downstream resolution (provisioning URL, admin key path,
+// license key, push reconciliation) targets local.
+func useLocalStackContext(w io.Writer) error {
+	local, activeIsRemote, err := localStackContext()
+	if err != nil {
+		return err
+	}
+	if apiURL != "" && !clicontext.IsLoopback(apiURL) {
+		return fmt.Errorf("--api-url %q is not a local endpoint; 'sukko up' operates the local stack", apiURL)
+	}
+	if activeIsRemote {
+		fmt.Fprintf(w, "Note: active context %q is not the local context; 'sukko up' operates the local stack.\n", resolvedCtx.Name)
+	}
+	resolvedCtx = local
+	return nil
+}
+
 func provisionDefaultTenant(cmd *cobra.Command) error {
 	c, err := newClient()
 	if err != nil {
@@ -481,8 +524,9 @@ func diagnoseBootFailure(cmd *cobra.Command, mgr *compose.Manager) {
 }
 
 // reconcilePushService starts or stops push-service based on the final edition.
-// Uses findLocalContext for license key and provisioning URL.
-// Precondition: runUp has already verified resolvedCtx != nil, which guarantees resolvedStore != nil.
+// Uses FindLocalContext for the license key and provisioning URL.
+// Precondition: runUp has called useLocalStackContext, so resolvedStore is non-nil and
+// resolvedCtx is the local context.
 func reconcilePushService(cmd *cobra.Command, mgr *compose.Manager, cfg ProjectConfig) {
 	localCtx, err := resolvedStore.FindLocalContext()
 	if err != nil || localCtx == nil {

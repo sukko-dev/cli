@@ -189,8 +189,13 @@ The `⚠` fires for a `remote` context, an untyped/hand-edited context, and for 
 URL was overridden by `--api-url`/`SUKKO_*` to point off-box (shown as `[endpoint overridden]`). The
 banner goes to stderr, so it never interferes with `-o json` or piped stdout.
 
-The connection method is **HTTPS REST to the API, not SSH** — there is no remote shell. `sukko up`,
-`down`, and `init` boot, stop, and set up the **local** Docker Compose stack.
+The connection method is **HTTPS REST to the API, not SSH** — there is no remote shell.
+
+`sukko up`, `down`, `status`, and `init` operate the **local** Docker Compose stack and ignore the
+active context, so switching to a remote/prod context never redirects them off-box; `up` and `status`
+print a note when a non-local context is active, and `up` refuses a non-loopback `--api-url`. To check
+a remote stack's health, use `sukko health`, which probes whichever context is active; `sukko status`
+always reports the local stack.
 
 ### Confirming changes to a remote stack
 
