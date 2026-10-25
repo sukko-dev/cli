@@ -159,7 +159,7 @@ func TestLicenseLogin_PendingThenStoresKey(t *testing.T) {
 		t.Fatalf("stored key mismatch")
 	}
 	out := buf.String()
-	for _, want := range []string{"https://sukko.dev/device", "BCDF-GHJK", "Logged in", "Community", "Acme"} {
+	for _, want := range []string{"https://sukko.dev/device", "BCDF-GHJK", "Logged in", "Community", "Acme", "set up your organization", portalSignupURL} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q\n%s", want, out)
 		}

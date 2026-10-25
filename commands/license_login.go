@@ -45,6 +45,12 @@ var (
 
 func licenseAPIURL() string { return envOrDefault("SUKKO_LICENSE_API_URL", defaultLicenseAPIURL) }
 
+// portalSignupURL is where a first-time user creates their account and sets up their organization —
+// a prerequisite for approving a device login (a license key belongs to an org, so the device page
+// gates on one). Shown as a one-line hint before the flow so a new user isn't stranded at a browser
+// dead-end. Email verification (email+password accounts only) is surfaced by the portal page itself.
+const portalSignupURL = "https://sukko.dev/signup"
+
 var licenseLoginCmd = &cobra.Command{
 	Use:   "login",
 	Short: "Log in to your Sukko account to fetch and store your license key",
@@ -86,6 +92,7 @@ func fetchAndStoreLicense(parent context.Context, out io.Writer, store *cliconte
 		return nil, fmt.Errorf("start device login: %w", err)
 	}
 
+	fmt.Fprintf(out, "First time here? Create your account and set up your organization at %s first, then approve this device.\n\n", portalSignupURL)
 	fmt.Fprintf(out, "To connect this device, open:\n\n    %s\n\nand enter the code:  %s\n\n", auth.VerificationURI, auth.UserCode)
 	if auth.VerificationURIComplete != "" {
 		fmt.Fprintf(out, "Or open this link, which fills the code in for you:\n    %s\n\n", auth.VerificationURIComplete)
