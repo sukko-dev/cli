@@ -163,6 +163,25 @@ sukko context create production \
 
 **Resolution order**: CLI flag > environment variable > context value > default.
 
+### Which stack am I operating?
+
+Commands that operate against a stack's API (`tenant`, `key`, `rule`, `quota`, `topics`, `webhook`,
+`publish`, `subscribe`, `connections`, `test`, `config view`, `edition`) print a one-line banner to
+**stderr** naming the active context, whether it is `local` or `remote`, and the effective URL they
+are about to dial — so a command against a remote stack is never mistaken for a local one. Any target
+that is not a known-local dial is marked with `⚠` and highlighted on a terminal:
+
+```
+⚠ provisioning API: prod (remote) · https://api.sukko.example.com
+```
+
+The `⚠` fires for a `remote` context, an untyped/hand-edited context, and for a `local` context whose
+URL was overridden by `--api-url`/`SUKKO_*` to point off-box (shown as `[endpoint overridden]`). The
+banner goes to stderr, so it never interferes with `-o json` or piped stdout.
+
+The connection method is **HTTPS REST to the API, not SSH** — there is no remote shell. `sukko up`,
+`down`, and `init` boot, stop, and set up the **local** Docker Compose stack.
+
 ## Local Development
 
 ### Initialization

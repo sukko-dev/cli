@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	clicontext "github.com/sukko-dev/cli/context"
 )
 
 const testHTTPTimeout = 30 * time.Second
@@ -134,32 +136,26 @@ var testValidateCmd = &cobra.Command{
 	},
 }
 
-// isLocalContext returns true if the context URLs point to localhost.
-// Local dev contexts use Docker-internal URLs in the tester — context passthrough
-// would send unreachable localhost URLs to the tester container.
-func isLocalContext() bool {
-	if resolvedCtx == nil {
-		return false
-	}
-	for _, raw := range []string{resolvedCtx.GatewayURL, resolvedCtx.ProvisioningURL} {
-		if u, err := url.Parse(raw); err == nil {
-			host := u.Hostname()
-			if host == "localhost" || host == "127.0.0.1" {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // buildTestContext assembles the context block for the tester API.
 // Returns nil if context should not be sent (local dev or incomplete).
 func buildTestContext(kafkaBrokers, kafkaTopicNamespace string) (map[string]any, error) {
 	if resolvedCtx == nil || resolvedStore == nil {
 		return nil, nil // no context available — tester uses own env vars
 	}
-	if isLocalContext() {
-		return nil, nil // local dev — tester uses Docker-internal URLs
+	if resolvedCtx.IsLocal() {
+		return nil, nil // local compose — the tester uses Docker-internal URLs, not these
+	}
+
+	// A non-local context's URLs are passed through to the tester and must be reachable
+	// from inside its container. Loopback URLs are reachable from this host but not from
+	// the tester, so refuse with a cause-specific error rather than silently skipping
+	// passthrough (which would run the suite against the tester's own defaults and look
+	// like it honored the context).
+	for _, raw := range []string{resolvedCtx.GatewayURL, resolvedCtx.ProvisioningURL} {
+		if clicontext.IsLoopback(raw) {
+			return nil, fmt.Errorf("context %q is not local but its URLs are loopback (%s) — the tester cannot reach them; use a context with routable URLs for test runs, or 'sukko init' for a local stack",
+				resolvedCtx.Name, raw)
+		}
 	}
 
 	// Validate core fields (all-or-nothing)
@@ -195,6 +191,7 @@ func buildTestContext(kafkaBrokers, kafkaTopicNamespace string) (map[string]any,
 
 func runTest(cmd *cobra.Command, testType string, extra map[string]any) error {
 	testerURL := resolveTesterURL(testTesterURL)
+	emitTargetBanner(seamTester, testerURL)
 	tok := resolveTesterToken()
 
 	ctx := context.Background()

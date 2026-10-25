@@ -9,49 +9,18 @@ import (
 
 // These tests mutate package-level resolvedCtx/resolvedStore — no t.Parallel()
 // on subtests to avoid data races on shared globals.
-
-func TestIsLocalContext(t *testing.T) {
-	tests := []struct {
-		name      string
-		ctx       *clicontext.Context
-		wantLocal bool
-	}{
-		{
-			name:      "localhost gateway",
-			ctx:       &clicontext.Context{GatewayURL: "ws://localhost:3000", ProvisioningURL: "http://remote:8080"},
-			wantLocal: true,
-		},
-		{
-			name:      "127.0.0.1 provisioning",
-			ctx:       &clicontext.Context{GatewayURL: "wss://remote:3000", ProvisioningURL: "http://127.0.0.1:8080"},
-			wantLocal: true,
-		},
-		{
-			name:      "remote URLs",
-			ctx:       &clicontext.Context{GatewayURL: "wss://ws.example.com", ProvisioningURL: "https://api.example.com"},
-			wantLocal: false,
-		},
-		{
-			name:      "nil context",
-			ctx:       nil,
-			wantLocal: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			origCtx := resolvedCtx
-			resolvedCtx = tt.ctx
-			defer func() { resolvedCtx = origCtx }()
-
-			if got := isLocalContext(); got != tt.wantLocal {
-				t.Errorf("isLocalContext() = %v, want %v", got, tt.wantLocal)
-			}
-		})
-	}
-}
+//
+// The local-vs-remote signal itself (Context.IsLocal) and loopback detection
+// (context.IsLoopback) are unit-tested in the context package; these tests cover how
+// buildTestContext routes on them.
 
 func TestBuildTestContext(t *testing.T) {
+	// A real store so the cases past the nil-store guard reach the IsLocal/loopback routing.
+	store, err := clicontext.NewStoreWithDir(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStoreWithDir: %v", err)
+	}
+
 	tests := []struct {
 		name           string
 		ctx            *clicontext.Context
@@ -64,18 +33,39 @@ func TestBuildTestContext(t *testing.T) {
 		{
 			name:    "nil context returns nil",
 			ctx:     nil,
-			wantNil: true,
-		},
-		{
-			name:    "localhost returns nil",
-			ctx:     &clicontext.Context{GatewayURL: "ws://localhost:3000", ProvisioningURL: "http://localhost:8080"},
+			store:   store,
 			wantNil: true,
 		},
 		{
 			name:    "nil store returns nil",
-			ctx:     &clicontext.Context{GatewayURL: "wss://ws.example.com", ProvisioningURL: "https://api.example.com"},
+			ctx:     &clicontext.Context{Type: clicontext.TypeRemote, GatewayURL: "wss://ws.example.com", ProvisioningURL: "https://api.example.com"},
 			store:   nil,
 			wantNil: true,
+		},
+		{
+			// Type is authoritative: a local context skips passthrough even though its
+			// URLs are loopback (the tester uses its own Docker-internal URLs).
+			name:    "local context skips passthrough",
+			ctx:     &clicontext.Context{Type: clicontext.TypeLocal, GatewayURL: "ws://localhost:3000", ProvisioningURL: "http://localhost:8080"},
+			store:   store,
+			wantNil: true,
+		},
+		{
+			// A non-local context with loopback URLs is the disagreement the old heuristic
+			// hid by silently skipping; now it is a cause-specific error, not a quiet skip.
+			name:           "remote context with loopback urls errors",
+			ctx:            &clicontext.Context{Name: "prod", Type: clicontext.TypeRemote, GatewayURL: "wss://ws.example.com", ProvisioningURL: "http://localhost:8080"},
+			store:          store,
+			wantErr:        true,
+			wantErrContain: "loopback",
+		},
+		{
+			// An untyped/legacy context is treated as non-local; loopback URLs still error.
+			name:           "untyped context with loopback urls errors",
+			ctx:            &clicontext.Context{Name: "legacy", GatewayURL: "ws://localhost:3000", ProvisioningURL: "http://localhost:8080"},
+			store:          store,
+			wantErr:        true,
+			wantErrContain: "loopback",
 		},
 	}
 

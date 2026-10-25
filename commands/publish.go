@@ -42,6 +42,7 @@ var publishCmd = &cobra.Command{
 		}
 
 		gatewayURL := resolveGatewayURL(pubGateway)
+		emitTargetBanner(seamGateway, gatewayURL)
 		tok, apiKey := resolveWSAuth(pubToken, pubAPIKey)
 
 		opts := wsDialOpts(tok, apiKey)

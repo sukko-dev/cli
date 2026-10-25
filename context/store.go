@@ -225,7 +225,7 @@ func (s *Store) FindLocalContext() (*Context, error) {
 		return nil, fmt.Errorf("find local context: %w", err)
 	}
 	for _, ctx := range contexts {
-		if ctx.Type == "local" {
+		if ctx.Type == TypeLocal {
 			return &ctx, nil
 		}
 	}
