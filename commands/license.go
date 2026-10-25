@@ -27,9 +27,48 @@ var licenseCmd = &cobra.Command{
 
 // Edition identifiers as reported by provisioning's /edition and license endpoints.
 const (
+	editionCommunity  = "community"
 	editionPro        = "pro"
 	editionEnterprise = "enterprise"
 )
+
+// editionRank orders the editions for "at least" comparisons. An unknown or empty edition ranks
+// as community (lowest), so a missing or garbled edition can never unlock a gated feature.
+var editionRank = map[string]int{
+	editionCommunity:  0,
+	editionPro:        1,
+	editionEnterprise: 2,
+}
+
+// editionAtLeast reports whether the `have` edition meets or exceeds the `need` tier. This is the
+// single edition gate the CLI uses for EVERY license-gated feature — prompts, flags, and env
+// toggles all route through it so the policy lives in one place.
+func editionAtLeast(have, need string) bool {
+	return editionRank[strings.ToLower(strings.TrimSpace(have))] >= editionRank[need]
+}
+
+// licenseState distinguishes why a license did or didn't yield an edition, so callers can explain
+// the difference between "no license set" and "license key unreadable" rather than lumping them.
+type licenseState int
+
+const (
+	licenseAbsent     licenseState = iota // no license key is set
+	licenseUnreadable                     // a key is present but could not be decoded
+	licensePresent                        // decoded OK; edition is meaningful
+)
+
+// readLicenseEdition decodes the effective license key into its edition and a state. On an absent
+// or unreadable key the edition is "" (which ranks as community under editionAtLeast).
+func readLicenseEdition(licenseKey string) (edition string, state licenseState) {
+	if strings.TrimSpace(licenseKey) == "" {
+		return "", licenseAbsent
+	}
+	claims, err := decodeLicenseClaims(licenseKey)
+	if err != nil {
+		return "", licenseUnreadable
+	}
+	return claims.Edition, licensePresent
+}
 
 // licenseStatusPendingRestart is the `status` the provisioning reload API returns when
 // a key is accepted but LOWERS the edition or capacity: it is persisted and broadcast
@@ -47,7 +86,7 @@ var pushComposeProfiles = []string{"enterprise"}
 // Push-service boots with a Pro license (Web Push); FCM/APNs delivery
 // additionally requires Enterprise — that gate is enforced server-side.
 func editionSupportsPush(edition string) bool {
-	return edition == editionPro || edition == editionEnterprise
+	return editionAtLeast(edition, editionPro)
 }
 
 // pushOrchestration is the compose action derived from a license transition.

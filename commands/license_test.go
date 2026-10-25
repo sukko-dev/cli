@@ -262,3 +262,59 @@ func TestParseExpiry(t *testing.T) {
 		})
 	}
 }
+
+func TestEditionAtLeast(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		have, need string
+		want       bool
+	}{
+		{"community", "community", true},
+		{"community", "pro", false},
+		{"pro", "pro", true},
+		{"pro", "community", true},
+		{"pro", "enterprise", false},
+		{"enterprise", "pro", true},
+		{"enterprise", "enterprise", true},
+		{"PRO", "pro", true},     // case-insensitive
+		{"  pro  ", "pro", true}, // trimmed
+		{"", "pro", false},       // empty ranks as community
+		{"", "community", true},  // empty == community
+		{"bogus", "pro", false},  // unknown ranks as community
+		{"bogus", "community", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.have+"_vs_"+tc.need, func(t *testing.T) {
+			t.Parallel()
+			if got := editionAtLeast(tc.have, tc.need); got != tc.want {
+				t.Errorf("editionAtLeast(%q, %q) = %v, want %v", tc.have, tc.need, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestReadLicenseEdition(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		key         string
+		wantEdition string
+		wantState   licenseState
+	}{
+		{"absent", "", "", licenseAbsent},
+		{"whitespace is absent", "   ", "", licenseAbsent},
+		{"unreadable", "not-a-license", "", licenseUnreadable},
+		{"pro present", testLicenseKey(t, "pro"), "pro", licensePresent},
+		{"community present", testLicenseKey(t, "community"), "community", licensePresent},
+		{"enterprise present", testLicenseKey(t, "enterprise"), "enterprise", licensePresent},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ed, st := readLicenseEdition(tc.key)
+			if ed != tc.wantEdition || st != tc.wantState {
+				t.Errorf("readLicenseEdition(%q) = (%q, %d), want (%q, %d)", tc.key, ed, st, tc.wantEdition, tc.wantState)
+			}
+		})
+	}
+}
