@@ -23,6 +23,7 @@ func init() {
 	authCmd.AddCommand(authRegisterCmd)
 	authCmd.AddCommand(authRevokeCmd)
 	authCmd.AddCommand(authListCmd)
+	markMutating(authRegisterCmd, authRevokeCmd) // keygen/pubkey are local; list is a read
 	authRegisterCmd.Flags().StringVar(&authKeyName, "name", "", "Admin name (defaults to context name)")
 	rootCmd.AddCommand(authCmd)
 }

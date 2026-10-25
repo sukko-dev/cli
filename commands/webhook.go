@@ -13,6 +13,7 @@ import (
 func init() {
 	rootCmd.AddCommand(webhookCmd)
 	webhookCmd.AddCommand(webhookCreateCmd, webhookListCmd, webhookGetCmd, webhookUpdateCmd, webhookDeleteCmd, webhookTestCmd)
+	markMutating(webhookCreateCmd, webhookUpdateCmd, webhookDeleteCmd)
 
 	// Every webhook subcommand is tenant-scoped and operator-authenticated.
 	for _, c := range []*cobra.Command{webhookCreateCmd, webhookListCmd, webhookGetCmd, webhookUpdateCmd, webhookDeleteCmd, webhookTestCmd} {

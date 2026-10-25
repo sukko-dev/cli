@@ -31,6 +31,8 @@ func init() {
 	_ = routingAddCmd.MarkFlagRequired("ingress-topic")
 	_ = routingAddCmd.MarkFlagRequired("priority")
 
+	markMutating(routingSetCmd, routingDeleteCmd, routingAddCmd, channelsSetCmd, channelsDeleteCmd)
+
 	// channels subcommands
 	channelsCmd.AddCommand(channelsGetCmd, channelsSetCmd, channelsDeleteCmd)
 	channelsGetCmd.Flags().String("tenant", "", "Tenant ID (uses active tenant from context if not set)")

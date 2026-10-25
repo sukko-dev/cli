@@ -22,6 +22,7 @@ var keysGenerate bool
 func init() {
 	rootCmd.AddCommand(keysCmd)
 	keysCmd.AddCommand(keysCreateCmd, keysListCmd, keysRevokeCmd)
+	markMutating(keysCreateCmd, keysRevokeCmd)
 
 	// create flags
 	keysCreateCmd.Flags().String("tenant", "", "Tenant ID (uses active tenant from context if not set)")

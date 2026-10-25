@@ -33,6 +33,7 @@ var (
 
 func init() {
 	tokenCmd.AddCommand(tokenGenerateCmd, tokenValidateCmd, tokenRevokeCmd)
+	markMutating(tokenRevokeCmd) // generate/validate are local crypto, not server writes
 
 	tokenRevokeCmd.Flags().StringVar(&revokeJTI, "jti", "", "Revoke a specific session by JWT ID")
 	tokenRevokeCmd.Flags().StringVar(&revokeSub, "sub", "", "Revoke all sessions for a user")

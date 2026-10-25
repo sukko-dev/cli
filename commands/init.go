@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -319,8 +320,15 @@ func initResolveEdition(cmd *cobra.Command, store *clicontext.Store, ctx *clicon
 	return claims.Edition, licensePresent, nil
 }
 
-func promptChoice(cmd *cobra.Command, label string, options []string, defaultVal string) (string, error) { //nolint:unparam // error return reserved for future validation; callers already handle it
-	fmt.Fprintf(cmd.OutOrStdout(), "%s (%s) [%s]: ", label, joinOptions(options), defaultVal)
+func promptChoice(cmd *cobra.Command, label string, options []string, defaultVal string) (string, error) {
+	return promptChoiceW(cmd.OutOrStdout(), label, options, defaultVal)
+}
+
+// promptChoiceW is promptChoice with an explicit prompt writer, so a caller can keep the
+// chrome off stdout (e.g. the remote-mutation confirm writes to stderr to stay clear of
+// -o json). It reads the answer from stdin; EOF/empty (non-TTY) returns the default.
+func promptChoiceW(w io.Writer, label string, options []string, defaultVal string) (string, error) {
+	fmt.Fprintf(w, "%s (%s) [%s]: ", label, joinOptions(options), defaultVal)
 
 	var input string
 	if _, err := fmt.Scanln(&input); err != nil || strings.TrimSpace(input) == "" {
@@ -333,7 +341,7 @@ func promptChoice(cmd *cobra.Command, label string, options []string, defaultVal
 		return input, nil
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "Invalid choice %q, using default %q\n", input, defaultVal)
+	fmt.Fprintf(w, "Invalid choice %q, using default %q\n", input, defaultVal)
 	return defaultVal, nil
 }
 

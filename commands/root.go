@@ -55,6 +55,11 @@ var rootCmd = &cobra.Command{
 		if output != "json" && output != "table" {
 			return fmt.Errorf("invalid output format %q: must be json or table", output)
 		}
+		if cmd.Annotations[annotMutates] == "true" {
+			if err := confirmRemoteMutation(cmd); err != nil {
+				return err
+			}
+		}
 		return nil
 	},
 	SilenceUsage: true,
@@ -66,6 +71,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&output, "output", "o", defaultOutput, "Output format (json|table)")
 	rootCmd.PersistentFlags().StringVar(&contextName, "context", os.Getenv("SUKKO_CONTEXT"), "Context name (overrides active context)")
 	rootCmd.PersistentFlags().BoolVar(&verbose, "verbose", false, "Enable verbose output")
+	rootCmd.PersistentFlags().BoolVarP(&assumeYes, "yes", "y", false, "Skip the confirmation prompt for state-changing commands against a remote stack")
 }
 
 // RootCmd returns the root cobra command for external tools (e.g., gendocs).
