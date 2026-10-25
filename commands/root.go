@@ -85,6 +85,7 @@ func newClient() (*client.AdminClient, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve provisioning config: %w", err)
 	}
+	emitTargetBanner(seamProvisioning, url)
 
 	c, err := client.New(client.Config{
 		BaseURL: url,

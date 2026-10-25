@@ -225,7 +225,7 @@ func ensureLocalContext(cmd *cobra.Command, store *clicontext.Store) (*clicontex
 
 	ctx := &clicontext.Context{
 		Name:            "local",
-		Type:            "local",
+		Type:            clicontext.TypeLocal,
 		GatewayURL:      defaultGatewayURL,
 		ProvisioningURL: defaultAPIURL,
 		TesterURL:       defaultTesterURL,

@@ -41,6 +41,7 @@ For full deployment validation (Kafka pipeline, multi-tenant isolation),
 use 'sukko test smoke' which orchestrates the tester service.`,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		gatewayURL := resolveGatewayURL(connGateway)
+		emitTargetBanner(seamGateway, gatewayURL)
 		tok, apiKey := resolveWSAuth(connToken, connAPIKey)
 
 		if tok == "" && apiKey == "" {

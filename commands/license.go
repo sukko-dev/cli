@@ -406,7 +406,7 @@ func runLicensePush(cmd *cobra.Command, args []string) error {
 	// Pro+ (Web Push); FCM/APNs delivery additionally requires Enterprise. A deferred
 	// reload changes nothing live, so it drives no push transition (reloadPushAction
 	// returns pushNone) and prints no K8s start hint for the pending edition.
-	if resolvedCtx == nil || resolvedCtx.Type != "local" {
+	if !resolvedCtx.IsLocal() {
 		if !deferred && editionSupportsPush(resp.Edition) {
 			fmt.Fprintln(cmd.OutOrStdout(), "To start push-service in K8s: helm upgrade --set push-service.enabled=true")
 		}

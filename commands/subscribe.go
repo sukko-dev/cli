@@ -31,6 +31,7 @@ var subscribeCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		channels := args
 		gatewayURL := resolveGatewayURL(subGateway)
+		emitTargetBanner(seamGateway, gatewayURL)
 		tok, apiKey := resolveWSAuth(subToken, subAPIKey)
 
 		opts := wsDialOpts(tok, apiKey)

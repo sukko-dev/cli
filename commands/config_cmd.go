@@ -85,6 +85,7 @@ var configViewCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		emitTargetBanner(seamProvisioning, url)
 		configURL := strings.TrimRight(url, "/") + "/config"
 
 		req, err := http.NewRequestWithContext(cmd.Context(), http.MethodGet, configURL, http.NoBody)

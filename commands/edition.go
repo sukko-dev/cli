@@ -83,8 +83,10 @@ func mergeEditionUsage(dst, src *client.EditionUsage) {
 
 func runEdition(cmd *cobra.Command, _ []string) error {
 	// Try provisioning API (no auth required) — has tenant/rule usage
+	provURL := resolveProvisioningURL()
+	emitTargetBanner(seamProvisioning, provURL)
 	provClient, err := client.New(client.Config{
-		BaseURL: resolveProvisioningURL(),
+		BaseURL: provURL,
 		Timeout: client.DefaultClientTimeout,
 	})
 	if err != nil {
