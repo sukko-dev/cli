@@ -12,6 +12,8 @@ func init() {
 	rootCmd.AddCommand(tenantCmd)
 	tenantCmd.AddCommand(tenantCreateCmd, tenantGetCmd, tenantListCmd, tenantUpdateCmd,
 		tenantSuspendCmd, tenantReactivateCmd, tenantDeprovisionCmd, tenantDeleteCmd)
+	markMutating(tenantCreateCmd, tenantUpdateCmd, tenantSuspendCmd, tenantReactivateCmd,
+		tenantDeprovisionCmd, tenantDeleteCmd)
 
 	// create flags — "slug" matches the provisioning API's CreateTenantRequest
 	// field (#53: the old --id flag serialized to an "id" key the API never

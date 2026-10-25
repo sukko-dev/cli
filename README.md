@@ -192,6 +192,20 @@ banner goes to stderr, so it never interferes with `-o json` or piped stdout.
 The connection method is **HTTPS REST to the API, not SSH** — there is no remote shell. `sukko up`,
 `down`, and `init` boot, stop, and set up the **local** Docker Compose stack.
 
+### Confirming changes to a remote stack
+
+Provisioning state-changes (`tenant create/update/suspend/reactivate/deprovision/delete`,
+`keys create/revoke`, `api-keys create/revoke`, `rules routing|channels set/add/delete`,
+`topics create/delete`, `webhook create/update/delete`, `quota update`, `license push`,
+`auth register/revoke`, `token revoke`) ask for confirmation before they run against a **remote**
+target, so a destructive op against production is never a single keystroke. Read-only commands and
+anything against a local stack are never gated. Pass `--yes`/`-y` to skip the prompt in scripts; in a
+non-interactive shell (CI) a remote change **fails fast** with a message pointing at `--yes` rather
+than prompting.
+
+Data-path commands (`publish`, and the `test` suites, which generate load) are **not** gated —
+they are routine traffic, not configuration changes.
+
 ## Local Development
 
 ### Initialization

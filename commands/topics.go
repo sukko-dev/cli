@@ -12,6 +12,7 @@ import (
 func init() {
 	rootCmd.AddCommand(topicsCmd)
 	topicsCmd.AddCommand(topicsListCmd, topicsCreateCmd, topicsDeleteCmd)
+	markMutating(topicsCreateCmd, topicsDeleteCmd)
 
 	topicsListCmd.Flags().String("tenant", "", "Tenant ID (uses active tenant from context if not set)")
 

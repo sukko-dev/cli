@@ -10,6 +10,7 @@ import (
 func init() {
 	rootCmd.AddCommand(apiKeyCmd)
 	apiKeyCmd.AddCommand(apiKeyCreateCmd, apiKeyListCmd, apiKeyRevokeCmd)
+	markMutating(apiKeyCreateCmd, apiKeyRevokeCmd)
 
 	// create flags
 	apiKeyCreateCmd.Flags().String("tenant", "", "Tenant ID (uses active tenant from context if not set)")

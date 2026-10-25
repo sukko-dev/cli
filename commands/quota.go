@@ -10,6 +10,7 @@ import (
 func init() {
 	rootCmd.AddCommand(quotaCmd)
 	quotaCmd.AddCommand(quotaGetCmd, quotaUpdateCmd)
+	markMutating(quotaUpdateCmd)
 
 	quotaGetCmd.Flags().String("tenant", "", "Tenant ID (uses active context if not set)")
 

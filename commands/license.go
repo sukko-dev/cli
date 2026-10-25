@@ -16,6 +16,7 @@ import (
 
 func init() {
 	licenseCmd.AddCommand(licenseSetCmd, licenseShowCmd, licenseRemoveCmd, licensePushCmd)
+	markMutating(licensePushCmd) // set/remove edit the local context; show is a read
 	rootCmd.AddCommand(licenseCmd)
 }
 
