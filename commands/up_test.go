@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"slices"
@@ -345,5 +346,48 @@ func TestApplyGatewayPushEnv(t *testing.T) {
 	applyGatewayPushEnv(disabled, testLicenseKey(t, "community"), backendKafka)
 	if _, present := disabled["GATEWAY_PUSH_ENABLED"]; present {
 		t.Error("disabled case: key must be absent, not set to false")
+	}
+}
+
+// TestReconcileTracingEnv pins the Pro-gating of distributed tracing at `up`: ws-server fatals
+// at boot if OTEL_TRACING_ENABLED=true on a non-Pro license, so `up` drops the flag and warns
+// (graceful) rather than letting the stack fail cryptically. Pro/Enterprise keep it.
+func TestReconcileTracingEnv(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		tracingOn   bool
+		key         string
+		wantEnabled bool   // OTEL_TRACING_ENABLED still "true" afterward
+		wantWarn    bool   // a message was printed
+		wantPhrase  string // a cause-specific phrase the message must contain (when wantWarn)
+	}{
+		{"pro keeps tracing", true, testLicenseKey(t, "pro"), true, false, ""},
+		{"enterprise keeps tracing", true, testLicenseKey(t, "enterprise"), true, false, ""},
+		{"community drops + explains upgrade", true, testLicenseKey(t, "community"), false, true, "does not include it"},
+		{"no license drops + explains login", true, "", false, true, "no license is set"},
+		{"garbage license drops + explains unreadable", true, "not-a-license", false, true, "could not be read"},
+		{"tracing off is untouched", false, testLicenseKey(t, "community"), false, false, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			env := map[string]string{}
+			if tt.tracingOn {
+				env["OTEL_TRACING_ENABLED"] = "true"
+			}
+			var buf bytes.Buffer
+			reconcileTracingEnv(&buf, env, tt.key)
+
+			if got := env["OTEL_TRACING_ENABLED"] == "true"; got != tt.wantEnabled {
+				t.Errorf("OTEL_TRACING_ENABLED enabled=%v, want %v", got, tt.wantEnabled)
+			}
+			if got := buf.Len() > 0; got != tt.wantWarn {
+				t.Errorf("warned=%v, want %v (output=%q)", got, tt.wantWarn, buf.String())
+			}
+			if tt.wantPhrase != "" && !strings.Contains(buf.String(), tt.wantPhrase) {
+				t.Errorf("message %q does not contain the cause-specific phrase %q", buf.String(), tt.wantPhrase)
+			}
+		})
 	}
 }

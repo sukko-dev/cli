@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -117,6 +118,10 @@ func runUp(cmd *cobra.Command, _ []string) error {
 	// reconciliation uses (push-capable edition + kafka-family backend), so the
 	// routes and the service they proxy to come up together.
 	applyGatewayPushEnv(envOverrides, resolveEffectiveLicenseKey(envOverrides), cfg.MessageBackend)
+
+	// Distributed tracing is Pro-gated; drop it (with a warning) on a lesser license so the
+	// stack boots instead of ws-server fataling cryptically at startup.
+	reconcileTracingEnv(cmd.ErrOrStderr(), envOverrides, resolveEffectiveLicenseKey(envOverrides))
 
 	fmt.Fprintf(cmd.OutOrStdout(), "Starting Sukko (postgres + %s + %s)...\n",
 		cfg.Broadcast, cfg.MessageBackend)
@@ -402,6 +407,34 @@ func applyGatewayPushEnv(envOverrides map[string]string, licenseKey, messageBack
 	if gatewayPushEnabled(licenseKey, messageBackend) {
 		envOverrides["GATEWAY_PUSH_ENABLED"] = "true"
 	}
+}
+
+// reconcileTracingEnv gates OTEL_TRACING_ENABLED against the effective license. Distributed
+// tracing is Pro (features.go ConnectionTracing); ws-server fatals at boot with a cryptic
+// "connection tracing requires pro edition" if it is enabled on a lesser edition. So when tracing
+// is enabled in .sukko/config.json but the effective license won't allow it (no license, a lesser
+// edition, or an unreadable key), drop the flag and explain exactly what's wrong and how to fix
+// it — `up` boots without tracing (graceful, §IV) instead of crash-looping on a cryptic fatal.
+func reconcileTracingEnv(w io.Writer, envOverrides map[string]string, licenseKey string) {
+	if envOverrides["OTEL_TRACING_ENABLED"] != "true" {
+		return
+	}
+	edition, state := readLicenseEdition(licenseKey)
+	if state == licensePresent && editionAtLeast(edition, editionPro) {
+		return
+	}
+	delete(envOverrides, "OTEL_TRACING_ENABLED")
+
+	var reason string
+	switch state {
+	case licenseAbsent:
+		reason = "it is a Pro feature and no license is set. Run 'sukko license login' to use a Pro license, or set \"tracing\": false in .sukko/config.json."
+	case licenseUnreadable:
+		reason = "your license key could not be read (it may be malformed). Check 'sukko license show' or re-run 'sukko license login'."
+	case licensePresent: // decoded, but below Pro
+		reason = "it is a Pro feature and your current license does not include it. Upgrade to Pro, or set \"tracing\": false in .sukko/config.json."
+	}
+	fmt.Fprintf(w, "Distributed tracing is enabled in .sukko/config.json, but %s Starting without tracing.\n", reason)
 }
 
 // reconcilePushService starts or stops push-service based on the final edition.
