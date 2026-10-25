@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/sukko-dev/cli/client"
+	clicontext "github.com/sukko-dev/cli/context"
 )
 
 func init() {
@@ -85,6 +86,9 @@ func runEdition(cmd *cobra.Command, _ []string) error {
 	// Try provisioning API (no auth required) — has tenant/rule usage
 	provURL := resolveProvisioningURL()
 	emitTargetBanner(seamProvisioning, provURL)
+	if err := clicontext.RequireSecureURL(provURL); err != nil {
+		return fmt.Errorf("refusing insecure provisioning target: %w", err)
+	}
 	provClient, err := client.New(client.Config{
 		BaseURL: provURL,
 		Timeout: client.DefaultClientTimeout,

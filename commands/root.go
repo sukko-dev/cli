@@ -86,6 +86,9 @@ func newClient() (*client.AdminClient, error) {
 		return nil, fmt.Errorf("resolve provisioning config: %w", err)
 	}
 	emitTargetBanner(seamProvisioning, url)
+	if err := clicontext.RequireSecureURL(url); err != nil {
+		return nil, fmt.Errorf("refusing insecure provisioning target: %w", err)
+	}
 
 	c, err := client.New(client.Config{
 		BaseURL: url,

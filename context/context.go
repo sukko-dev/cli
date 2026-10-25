@@ -59,6 +59,60 @@ func IsLoopback(rawURL string) bool {
 	return false
 }
 
+// isInsecureURL reports whether rawURL would send data in cleartext across the network. It
+// is an allow-list and fails closed: only https/wss, or http/ws to a loopback host, are
+// secure. Anything else — a plaintext scheme to a non-loopback host, an unknown scheme, a
+// URL that does not parse, or one with no host — is insecure. The decision is purely about
+// the URL, never a context's Type, because a Type field is user-editable and must not be
+// able to turn a plaintext remote into an allowed one.
+func isInsecureURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return true // fail closed: cannot prove it is secure
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "https", "wss":
+		return false
+	case "http", "ws":
+		return !IsLoopback(rawURL) // loopback plaintext stays on the box — fine
+	default:
+		return true // unknown scheme: fail closed
+	}
+}
+
+// RequireSecureURL returns an error if rawURL would send credentials in cleartext — the
+// enforcement used at each dial seam against the *effective* URL (after flag/env/context
+// precedence), so a --api-url/SUKKO_* override to a plaintext remote is refused too, not
+// just a stored context (Constitution §IX). Loopback plaintext is allowed.
+func RequireSecureURL(rawURL string) error {
+	if isInsecureURL(rawURL) {
+		return fmt.Errorf("%q would send credentials in cleartext — use https/wss (reach a private endpoint over a loopback tunnel instead)", rawURL)
+	}
+	return nil
+}
+
+// ValidateURLSecurity rejects a context whose configured URLs would send admin tokens,
+// signed JWTs, or API keys over plaintext to a non-loopback host (§IX). It validates by URL,
+// not by Type — a correctly built local context is loopback by construction, and editing the
+// Type field cannot make a plaintext remote acceptable (§II). Enforced at the persistence
+// boundary (Store.Add); the dial seams enforce the same rule on the effective URL. Empty
+// optional URLs are skipped.
+func (c *Context) ValidateURLSecurity() error {
+	for _, f := range []struct{ label, rawURL string }{
+		{"provisioning URL", c.ProvisioningURL},
+		{"gateway URL", c.GatewayURL},
+		{"tester URL", c.TesterURL},
+	} {
+		if f.rawURL == "" {
+			continue
+		}
+		if err := RequireSecureURL(f.rawURL); err != nil {
+			return fmt.Errorf("%s %w", f.label, err)
+		}
+	}
+	return nil
+}
+
 // AdminToken decrypts and returns the admin token.
 func (c *Context) AdminToken(key []byte) (string, error) {
 	if c.AdminTokenEnc == "" {

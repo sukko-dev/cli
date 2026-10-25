@@ -192,6 +192,9 @@ func buildTestContext(kafkaBrokers, kafkaTopicNamespace string) (map[string]any,
 func runTest(cmd *cobra.Command, testType string, extra map[string]any) error {
 	testerURL := resolveTesterURL(testTesterURL)
 	emitTargetBanner(seamTester, testerURL)
+	if err := clicontext.RequireSecureURL(testerURL); err != nil {
+		return fmt.Errorf("refusing insecure tester target: %w", err)
+	}
 	tok := resolveTesterToken()
 
 	ctx := context.Background()

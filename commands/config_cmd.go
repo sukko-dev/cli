@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	clicontext "github.com/sukko-dev/cli/context"
 )
 
 const (
@@ -86,6 +87,9 @@ var configViewCmd = &cobra.Command{
 			return err
 		}
 		emitTargetBanner(seamProvisioning, url)
+		if err := clicontext.RequireSecureURL(url); err != nil {
+			return fmt.Errorf("refusing insecure provisioning target: %w", err)
+		}
 		configURL := strings.TrimRight(url, "/") + "/config"
 
 		req, err := http.NewRequestWithContext(cmd.Context(), http.MethodGet, configURL, http.NoBody)
