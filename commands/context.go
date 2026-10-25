@@ -113,6 +113,16 @@ func runContextAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("init context store: %w", err)
 	}
 
+	// Validate the provided URLs (scheme + host) the same way the interactive path does.
+	for _, raw := range []string{ctxProvisioningURL, ctxGatewayURL, ctxTesterURL} {
+		if raw == "" {
+			continue
+		}
+		if err := validateURL(raw); err != nil {
+			return err
+		}
+	}
+
 	ctx := &clicontext.Context{
 		Name:            name,
 		Type:            clicontext.TypeRemote,

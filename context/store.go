@@ -72,6 +72,12 @@ func (s *Store) Add(ctx *Context) error {
 	if err := validateContextName(ctx.Name); err != nil {
 		return err
 	}
+	// Single persistence boundary for the TLS rule (§II/§IX): nothing insecure is ever
+	// written, whatever code path built the context (context add/create, init, a license
+	// re-save). The dial seams enforce the same rule on the effective URL at use time.
+	if err := ctx.ValidateURLSecurity(); err != nil {
+		return err
+	}
 
 	data, err := json.MarshalIndent(ctx, "", "  ")
 	if err != nil {

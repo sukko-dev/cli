@@ -163,6 +163,16 @@ sukko context create production \
 
 **Resolution order**: CLI flag > environment variable > context value > default.
 
+### Transport security
+
+The CLI refuses to send admin tokens, signed JWTs, or API keys in the clear: a provisioning, gateway,
+or tester endpoint that is plaintext (`http`/`ws`) to a **non-loopback** host is rejected. This is
+decided by the URL, not by a context's `local`/`remote` label, and is enforced in two places — when a
+context is saved (so nothing insecure is ever written, including by `init`), and at the moment a
+command dials (so a `--api-url`/`SUKKO_*` override or a hand-edited config is caught too). To reach a
+private endpoint, use a loopback tunnel (e.g. `kubectl port-forward`) — loopback plaintext
+(`localhost`/`127.0.0.1`/`::1`) is allowed, since nothing crosses the network.
+
 ### Which stack am I operating?
 
 Commands that operate against a stack's API (`tenant`, `key`, `rule`, `quota`, `topics`, `webhook`,

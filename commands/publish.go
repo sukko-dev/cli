@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/sukko-dev/cli/client"
+	clicontext "github.com/sukko-dev/cli/context"
 )
 
 var (
@@ -43,6 +44,9 @@ var publishCmd = &cobra.Command{
 
 		gatewayURL := resolveGatewayURL(pubGateway)
 		emitTargetBanner(seamGateway, gatewayURL)
+		if err := clicontext.RequireSecureURL(gatewayURL); err != nil {
+			return fmt.Errorf("refusing insecure gateway target: %w", err)
+		}
 		tok, apiKey := resolveWSAuth(pubToken, pubAPIKey)
 
 		opts := wsDialOpts(tok, apiKey)

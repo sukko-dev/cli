@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/sukko-dev/cli/client"
+	clicontext "github.com/sukko-dev/cli/context"
 )
 
 var (
@@ -32,6 +33,9 @@ var subscribeCmd = &cobra.Command{
 		channels := args
 		gatewayURL := resolveGatewayURL(subGateway)
 		emitTargetBanner(seamGateway, gatewayURL)
+		if err := clicontext.RequireSecureURL(gatewayURL); err != nil {
+			return fmt.Errorf("refusing insecure gateway target: %w", err)
+		}
 		tok, apiKey := resolveWSAuth(subToken, subAPIKey)
 
 		opts := wsDialOpts(tok, apiKey)
