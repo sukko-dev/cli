@@ -60,22 +60,14 @@ var statusCmd = &cobra.Command{
 			}
 		}
 
-		// Resolve URLs from context before building endpoints.
-		provURL := defaultAPIURL
-		gwHTTP := defaultGatewayHTTP
+		// status reports the LOCAL stack, so it probes the local endpoints, never the active
+		// context — otherwise `status` with a remote context active would probe prod and
+		// mislabel it as local status. Use `sukko health` to probe whichever context is active.
+		provURL, gwHTTP, testerURL := localStackProbeURLs()
 		serverURL := defaultServerURL
-		testerURL := defaultTesterURL
 
-		if resolvedCtx != nil {
-			if resolvedCtx.ProvisioningURL != "" {
-				provURL = resolvedCtx.ProvisioningURL
-			}
-			if resolvedCtx.GatewayURL != "" {
-				gwHTTP = wsToHTTP(resolvedCtx.GatewayURL)
-			}
-			if resolvedCtx.TesterURL != "" {
-				testerURL = resolvedCtx.TesterURL
-			}
+		if resolvedCtx != nil && !resolvedCtx.IsLocal() {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Note: 'sukko status' reports the local stack; use 'sukko health' for the active context %q.\n", resolvedCtx.Name)
 		}
 
 		// Health endpoint checks
@@ -98,7 +90,8 @@ var statusCmd = &cobra.Command{
 		}
 
 		if len(services) == 0 {
-			// No compose — try health endpoints directly (remote mode)
+			// No compose in this directory — probe the local endpoints directly, in case a
+			// stack is running without a compose project here.
 			ctx := cmd.Context()
 			for _, ep := range endpoints {
 				status := checkHealth(ctx, ep.url)
@@ -117,6 +110,31 @@ var statusCmd = &cobra.Command{
 		printStatus(items)
 		return nil
 	},
+}
+
+// localStackProbeURLs returns the provisioning, gateway-HTTP, and tester URLs for the LOCAL
+// stack — the local context's URLs, or the localhost defaults. It never consults the active
+// context, so `status` reports the local stack even when a remote context is active.
+func localStackProbeURLs() (prov, gatewayHTTP, tester string) {
+	prov, gatewayHTTP, tester = defaultAPIURL, defaultGatewayHTTP, defaultTesterURL
+	if resolvedStore == nil {
+		return
+	}
+	// best-effort: an unreadable store falls back to the loopback defaults above.
+	localCtx, _ := resolvedStore.FindLocalContext()
+	if localCtx == nil {
+		return
+	}
+	if localCtx.ProvisioningURL != "" {
+		prov = localCtx.ProvisioningURL
+	}
+	if localCtx.GatewayURL != "" {
+		gatewayHTTP = wsToHTTP(localCtx.GatewayURL)
+	}
+	if localCtx.TesterURL != "" {
+		tester = localCtx.TesterURL
+	}
+	return
 }
 
 func checkHealth(ctx context.Context, url string) string {
