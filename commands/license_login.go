@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/sukko-dev/cli/client"
+	clicontext "github.com/sukko-dev/cli/context"
 )
 
 func init() {
@@ -61,19 +63,29 @@ func runLicenseLogin(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	claims, err := fetchAndStoreLicense(cmd.Context(), cmd.OutOrStdout(), store, ctx)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "\nLogged in. Edition: %s, Org: %s, Expires: %s\n",
+		capitalizeEdition(claims.Edition), claims.Org, formatExpiry(claims.Exp))
+	return nil
+}
 
-	// Ctrl-C / SIGTERM cancels the wait cleanly (returns a non-nil error → exit 1,
-	// as nothing was stored).
-	signalCtx, cancel := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
+// fetchAndStoreLicense runs the device-login flow against the license service and stores the
+// issued key (encrypted) into cliCtx — the same slot 'sukko license set' uses. Shared by
+// 'sukko license login' and 'sukko init'. Progress is written to out; Ctrl-C / SIGTERM cancels
+// the wait cleanly (nothing is stored). Returns the decoded claims on success.
+func fetchAndStoreLicense(parent context.Context, out io.Writer, store *clicontext.Store, cliCtx *clicontext.Context) (*licenseClaims, error) {
+	signalCtx, cancel := signal.NotifyContext(parent, syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
 	c := client.NewLicenseDeviceClient(licenseAPIURL())
 	auth, err := c.Authorize(signalCtx)
 	if err != nil {
-		return fmt.Errorf("start device login: %w", err)
+		return nil, fmt.Errorf("start device login: %w", err)
 	}
 
-	out := cmd.OutOrStdout()
 	fmt.Fprintf(out, "To connect this device, open:\n\n    %s\n\nand enter the code:  %s\n\n", auth.VerificationURI, auth.UserCode)
 	if auth.VerificationURIComplete != "" {
 		fmt.Fprintf(out, "Or open this link, which fills the code in for you:\n    %s\n\n", auth.VerificationURIComplete)
@@ -82,26 +94,23 @@ func runLicenseLogin(cmd *cobra.Command, _ []string) error {
 
 	key, err := pollForLicenseKey(signalCtx, c, auth)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Store via the same path as 'sukko license set' (validate claims, encrypt).
 	claims, err := decodeLicenseClaims(key)
 	if err != nil {
-		return fmt.Errorf("validate issued license key: %w", err)
+		return nil, fmt.Errorf("validate issued license key: %w", err)
 	}
 	enc, err := store.EncryptSecret(key)
 	if err != nil {
-		return fmt.Errorf("encrypt license key: %w", err)
+		return nil, fmt.Errorf("encrypt license key: %w", err)
 	}
-	ctx.LicenseKeyEnc = enc
-	if err := store.Add(ctx); err != nil {
-		return fmt.Errorf("save context: %w", err)
+	cliCtx.LicenseKeyEnc = enc
+	if err := store.Add(cliCtx); err != nil {
+		return nil, fmt.Errorf("save context: %w", err)
 	}
-
-	fmt.Fprintf(out, "\nLogged in. Edition: %s, Org: %s, Expires: %s\n",
-		capitalizeEdition(claims.Edition), claims.Org, formatExpiry(claims.Exp))
-	return nil
+	return claims, nil
 }
 
 // pollForLicenseKey polls the token endpoint until the user approves (returns the

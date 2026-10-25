@@ -177,16 +177,18 @@ sukko init
 sukko init --defaults
 ```
 
+If you are not logged in yet, interactive `sukko init` offers to fetch your Sukko license (a browser device login, the same as `sukko license login`) so it can tailor the setup to your edition. You can decline; `--defaults` and non-interactive runs skip the offer. Re-running `init` keeps a stored license — it is removed only by `sukko license remove`.
+
 Infrastructure choices:
 
 | Component | Options | Default |
 |-----------|---------|---------|
 | Message backend | `direct`, `kafka`, `redpanda` | `direct` |
 | Observability | `yes`, `no` | `no` |
-| Distributed tracing | `yes`, `no` | `yes` (if observability enabled) |
+| Distributed tracing | `yes`, `no` | prompted only with a **Pro** license (otherwise off) |
 | Continuous profiling | `yes`, `no` | `yes` (if observability enabled) |
 
-The broadcast bus (Valkey) and database (Postgres) are fixed — `init` does not prompt for them.
+Distributed tracing is a Pro feature — `init` offers it only when your license includes it; otherwise it's skipped (enabling it on a lesser license would make the server fail to boot). The broadcast bus (Valkey) and database (Postgres) are fixed — `init` does not prompt for them.
 
 ### Starting & Stopping
 

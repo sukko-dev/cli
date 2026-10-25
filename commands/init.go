@@ -1,9 +1,11 @@
 package commands
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,7 +14,18 @@ import (
 
 	"github.com/spf13/cobra"
 	clicontext "github.com/sukko-dev/cli/context"
+	"golang.org/x/term"
 )
+
+// stdinIsInteractive reports whether stdin is a real terminal. It gates prompts that must NOT
+// auto-fire on their default in a piped/CI run — notably the device-login offer, which would
+// otherwise start a minutes-long network wait when bare `sukko init` is run non-interactively
+// (promptChoice returns its default on EOF). Uses the same termios check as promptSecret
+// (context.go) and isTTY (output.go) — a pipe, a regular file, and /dev/null all return false.
+// A package var so tests can simulate interactive / non-interactive stdin.
+var stdinIsInteractive = func() bool {
+	return term.IsTerminal(int(os.Stdin.Fd()))
+}
 
 const (
 	sukkoConfigDir   = ".sukko"
@@ -82,8 +95,12 @@ var initCmd = &cobra.Command{
 	Short: "Initialize a local Sukko development environment",
 	Long: `Initialize a local Sukko development environment.
 
-Creates .sukko/config.json with infrastructure selections and sets up
-a local context with dev credentials. Run 'sukko up' to start services.`,
+Creates .sukko/config.json with infrastructure selections and sets up a local
+context with dev credentials. If you are not logged in yet, init offers to fetch
+your Sukko license (device login) so it can tailor the setup to your edition;
+Pro-only features (e.g. distributed tracing) are offered only when your license
+includes them. Re-running init keeps a stored license — it is removed only by
+'sukko license remove'. Run 'sukko up' to start services.`,
 	RunE: runInit,
 }
 
@@ -118,8 +135,23 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		WebhookInternalToken: webhookToken,
 	}
 
+	// Set up the local context BEFORE the feature prompts, so we know the licensed edition (and
+	// can offer to fetch a license first) and only prompt for features the license can actually
+	// use — prompting for a gated feature a Community stack will refuse to boot with is pointless.
+	store, err := clicontext.NewStore()
+	if err != nil {
+		return fmt.Errorf("init context store: %w", err)
+	}
+	ctx, err := ensureLocalContext(cmd, store)
+	if err != nil {
+		return err
+	}
+	edition, licState, err := initResolveEdition(cmd, store, ctx)
+	if err != nil {
+		return err
+	}
+
 	if !useDefaults {
-		var err error
 		cfg.MessageBackend, err = promptChoice(cmd, "Message backend", []string{"direct", "kafka", "redpanda"}, "direct")
 		if err != nil {
 			return err
@@ -132,12 +164,20 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		cfg.Observability = obs == "yes"
 
 		if cfg.Observability {
-			tracing, err := promptChoice(cmd, "  Distributed tracing", []string{"yes", "no"}, "yes")
-			if err != nil {
-				return err
+			// Distributed tracing is Pro (features.go ConnectionTracing). Only offer it when the
+			// license includes it; otherwise skip (off) with a one-line note rather than prompt
+			// for something the stack can't run. Every gated feature is gated this way.
+			if licState == licensePresent && editionAtLeast(edition, editionPro) {
+				tracing, err := promptChoice(cmd, "  Distributed tracing", []string{"yes", "no"}, "yes")
+				if err != nil {
+					return err
+				}
+				cfg.Tracing = tracing == "yes"
+			} else {
+				fmt.Fprintln(cmd.OutOrStdout(), "  Distributed tracing — skipped (a Pro feature; run 'sukko license login' with a Pro license to enable it).")
 			}
-			cfg.Tracing = tracing == "yes"
 
+			// Continuous profiling is not edition-gated — always offered.
 			profiling, err := promptChoice(cmd, "  Continuous profiling", []string{"yes", "no"}, "yes")
 			if err != nil {
 				return err
@@ -163,16 +203,24 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "Config written to %s\n", configPath)
-
-	// Create local context
-	store, err := clicontext.NewStore()
-	if err != nil {
-		return fmt.Errorf("init context store: %w", err)
+	fmt.Fprintf(cmd.OutOrStdout(), "\nStack: %s + %s + %s\n", cfg.Database, cfg.Broadcast, cfg.MessageBackend)
+	if os.Getenv("SUKKO_DEV_ADMIN_TOKEN") == "" {
+		fmt.Fprintln(cmd.ErrOrStderr(), "Note: using default dev credentials. Set SUKKO_DEV_ADMIN_TOKEN for non-local environments.")
 	}
+	fmt.Fprintln(cmd.OutOrStdout(), "\nRun 'sukko up' to start the local environment.")
 
+	return nil
+}
+
+// ensureLocalContext creates (or idempotently updates) the "local" context and sets it active,
+// returning the context. Re-running init PRESERVES existing credentials: a stored license key and
+// API key are carried over from any existing local context, never wiped by the wholesale context
+// rewrite — those are removed only by 'sukko license remove' (industry-standard idempotent init).
+// The admin keypair `sukko up` requires is generated here too (idempotent).
+func ensureLocalContext(cmd *cobra.Command, store *clicontext.Store) (*clicontext.Context, error) {
 	tokenEnc, err := store.EncryptSecret(devAdminToken)
 	if err != nil {
-		return fmt.Errorf("encrypt admin token: %w", err)
+		return nil, fmt.Errorf("encrypt admin token: %w", err)
 	}
 
 	ctx := &clicontext.Context{
@@ -186,37 +234,89 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		ActiveTenant:    "demo",
 	}
 
+	// Carry over credentials from an existing local context so re-init never destroys them
+	// (they are removed only by 'sukko license remove'). A first run has no context yet
+	// (ErrContextNotFound) — nothing to preserve. Any OTHER read error (corrupt JSON, EACCES)
+	// must NOT be swallowed: the following store.Add would overwrite a file that may still hold a
+	// recoverable key, re-introducing the very data loss this fixes — so fail loudly instead.
+	switch existing, gerr := store.Get("local"); {
+	case gerr == nil && existing != nil:
+		ctx.LicenseKeyEnc = existing.LicenseKeyEnc
+		ctx.APIKeyEnc = existing.APIKeyEnc
+	case errors.Is(gerr, clicontext.ErrContextNotFound):
+		// first run — nothing to preserve
+	default:
+		return nil, fmt.Errorf("read existing local context (not overwriting it): %w", gerr)
+	}
+
 	if err := store.Add(ctx); err != nil {
-		return fmt.Errorf("add local context: %w", err)
+		return nil, fmt.Errorf("add local context: %w", err)
 	}
-
 	if err := store.SetActive("local"); err != nil {
-		return fmt.Errorf("set active context: %w", err)
+		return nil, fmt.Errorf("set active context: %w", err)
 	}
+	fmt.Fprintln(cmd.OutOrStdout(), "Local context ready and set as active.")
 
-	fmt.Fprintln(cmd.OutOrStdout(), "Local context created and set as active.")
-
-	// Generate the admin keypair `sukko up` requires, so the documented
-	// init→up quick-start works on a pristine machine (previously up failed
-	// with "run 'sukko auth keygen' first" while its own hint pointed back at
-	// init). Idempotent — an existing keypair is never regenerated.
 	keypairDir := filepath.Join(store.Dir(), ctx.Name) // same dir resolveKeypairDir() derives for the active context
 	created, _, err := ensureAdminKeypair(keypairDir)
 	if err != nil {
-		return fmt.Errorf("generate admin keypair: %w", err)
+		return nil, fmt.Errorf("generate admin keypair: %w", err)
 	}
 	if created {
 		fmt.Fprintln(cmd.OutOrStdout(), "Admin keypair generated (used to authenticate against provisioning).")
 	} else {
 		fmt.Fprintln(cmd.OutOrStdout(), "Admin keypair already present — kept.")
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "\nStack: %s + %s + %s\n", cfg.Database, cfg.Broadcast, cfg.MessageBackend)
-	if os.Getenv("SUKKO_DEV_ADMIN_TOKEN") == "" {
-		fmt.Fprintln(cmd.ErrOrStderr(), "Note: using default dev credentials. Set SUKKO_DEV_ADMIN_TOKEN for non-local environments.")
-	}
-	fmt.Fprintln(cmd.OutOrStdout(), "\nRun 'sukko up' to start the local environment.")
+	return ctx, nil
+}
 
-	return nil
+// initResolveEdition returns the effective license edition for gating init's feature prompts. If
+// the context already holds a license (from a prior login or 'license set', preserved across
+// re-init), that edition is used. Otherwise, when init is interactive, it offers to log in and
+// fetch one now; a decline, a non-interactive run (--defaults), or a login error leaves the stack
+// unlicensed — init continues and gated features are simply not offered.
+func initResolveEdition(cmd *cobra.Command, store *clicontext.Store, ctx *clicontext.Context) (edition string, state licenseState, err error) {
+	licenseKey, lkErr := ctx.LicenseKey(store.Key())
+	if lkErr != nil {
+		// A stored key that won't decrypt (e.g. a different machine/keyring) is not usable —
+		// tell the operator rather than silently treating it as absent, then fall through to the
+		// unlicensed path (a fresh login below recovers). Not fatal.
+		fmt.Fprintf(cmd.ErrOrStderr(), "Note: a stored license key could not be read (%v); treating this stack as unlicensed.\n", lkErr)
+		licenseKey = ""
+	}
+	edition, state = readLicenseEdition(licenseKey)
+	if state == licensePresent {
+		fmt.Fprintf(cmd.OutOrStdout(), "Using your %s license.\n", capitalizeEdition(edition))
+		return edition, state, nil
+	}
+
+	// Offer a browser device-login ONLY when stdin is a real terminal — never auto-start a
+	// minutes-long network wait on a piped/CI run (--defaults, or no TTY, where promptChoice
+	// returns its default on EOF). The prompt defaults to "no" so an operator hitting Enter
+	// through the defaults is not dropped into a browser flow either.
+	if useDefaults || !stdinIsInteractive() {
+		return edition, state, nil
+	}
+	// promptChoice never returns a non-nil error today (see its nolint:unparam); a prompt hiccup
+	// must not block init, so the discarded error is intentional.
+	choice, _ := promptChoice(cmd, "Log in to fetch your Sukko license now?", []string{"yes", "no"}, "no")
+	if choice != "yes" {
+		return edition, state, nil
+	}
+
+	claims, lerr := fetchAndStoreLicense(cmd.Context(), cmd.OutOrStdout(), store, ctx)
+	if lerr != nil {
+		// Ctrl-C means "stop" — abort init. Other failures (denied, expired, unreachable) are
+		// non-fatal: continue unlicensed; they can run 'sukko license login' later.
+		if errors.Is(lerr, context.Canceled) {
+			return "", state, fmt.Errorf("init canceled during license login: %w", lerr)
+		}
+		fmt.Fprintf(cmd.ErrOrStderr(), "License login did not complete (%v) — continuing without a license.\n", lerr)
+		return edition, state, nil
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Logged in. Edition: %s, Org: %s, Expires: %s\n",
+		capitalizeEdition(claims.Edition), claims.Org, formatExpiry(claims.Exp))
+	return claims.Edition, licensePresent, nil
 }
 
 func promptChoice(cmd *cobra.Command, label string, options []string, defaultVal string) (string, error) { //nolint:unparam // error return reserved for future validation; callers already handle it
