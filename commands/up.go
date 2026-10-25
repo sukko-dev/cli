@@ -138,6 +138,7 @@ func runUp(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("create compose manager: %w", err)
 	}
 	if err := mgr.Up(cmd.Context(), profiles, envOverrides, pullImages); err != nil {
+		diagnoseBootFailure(cmd, mgr)
 		return fmt.Errorf("start services: %w", err)
 	}
 
@@ -145,6 +146,7 @@ func runUp(cmd *cobra.Command, _ []string) error {
 	fmt.Fprintln(cmd.OutOrStdout(), "\nWaiting for services...")
 
 	if err := mgr.WaitForHealth(cmd.Context(), cmd.OutOrStdout(), []string{"provisioning", "ws-gateway", "ws-server", "sukko-tester"}, healthTimeout); err != nil {
+		diagnoseBootFailure(cmd, mgr)
 		return fmt.Errorf("health check: %w", err)
 	}
 
@@ -435,6 +437,47 @@ func reconcileTracingEnv(w io.Writer, envOverrides map[string]string, licenseKey
 		reason = "it is a Pro feature and your current license does not include it. Upgrade to Pro, or set \"tracing\": false in .sukko/config.json."
 	}
 	fmt.Fprintf(w, "Distributed tracing is enabled in .sukko/config.json, but %s Starting without tracing.\n", reason)
+}
+
+// bootFatalHints maps a substring of a known service STARTUP fatal (ws-server / provisioning
+// config-validation + license gates; see the platform's license/errors.go) to an actionable CLI
+// message. Order matters — more specific entries first. The point is to surface WHY a boot failed:
+// compose only reports a container as "unhealthy", leaving the real cause buried in its logs.
+var bootFatalHints = []struct{ substr, hint string }{
+	{"no license key", "No license is set. Run 'sukko license login' (Community is free), then 'sukko up' again."},
+	{"requires a valid license", "No valid license. Run 'sukko license login', then 'sukko up' again."},
+	{"is set but expired", "Your license key has expired. Re-key with 'sukko license login', then 'sukko up' again."},
+	{"requires enterprise edition", "A feature in .sukko/config.json needs an Enterprise license. Upgrade with 'sukko license login', or turn that feature off."},
+	{"requires pro edition", "A feature in .sukko/config.json needs a Pro license. Upgrade with 'sukko license login', or turn that feature off."},
+}
+
+// explainBootFailure scans captured service logs for the first known startup fatal and returns an
+// operator-facing explanation — the offending log line plus an action — or ok=false if none match.
+func explainBootFailure(logs string) (string, bool) {
+	for line := range strings.SplitSeq(logs, "\n") {
+		lower := strings.ToLower(line)
+		for _, bf := range bootFatalHints {
+			if strings.Contains(lower, bf.substr) {
+				return fmt.Sprintf("A Sukko service failed to start:\n    %s\n→ %s", strings.TrimSpace(line), bf.hint), true
+			}
+		}
+	}
+	return "", false
+}
+
+// diagnoseBootFailure best-effort surfaces WHY a boot failed, scanning recent service logs for a
+// known fatal. It never returns an error — it augments the failure the caller already reports.
+func diagnoseBootFailure(cmd *cobra.Command, mgr *compose.Manager) {
+	logs, err := mgr.RecentLogs(cmd.Context())
+	if msg, ok := explainBootFailure(logs); ok {
+		fmt.Fprintln(cmd.ErrOrStderr(), "\n"+msg)
+		return
+	}
+	if err != nil && logs == "" {
+		fmt.Fprintln(cmd.ErrOrStderr(), "\nA service failed to start, and its logs could not be read. Check 'docker ps' and 'sukko logs'.")
+		return
+	}
+	fmt.Fprintln(cmd.ErrOrStderr(), "\nA service failed to start. Run 'sukko logs' to see the full output.")
 }
 
 // reconcilePushService starts or stops push-service based on the final edition.

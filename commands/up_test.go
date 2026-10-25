@@ -391,3 +391,40 @@ func TestReconcileTracingEnv(t *testing.T) {
 		})
 	}
 }
+
+// TestExplainBootFailure pins the translation of known service startup fatals (the real strings
+// from the platform's license/errors.go + config validation) into actionable operator guidance.
+func TestExplainBootFailure(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		logs     string
+		wantHint string // substring the explanation must contain
+		wantOK   bool
+	}{
+		{"tracing pro gate", "ws-server-1  | FATAL config validation failed: connection tracing requires pro edition (current: community). Upgrade at https://x", "needs a Pro license", true},
+		{"no license", "provisioning-1 | no license key: Community requires a free account-issued license — set SUKKO_LICENSE_KEY (get one at https://x)", "No license is set", true},
+		{"invalid license", "provisioning-1 | provisioning requires a valid license: set SUKKO_LICENSE_KEY to an account-issued key", "No valid license", true},
+		{"expired", "provisioning-1 | SUKKO_LICENSE_KEY is set but expired and no DB license is present; re-key to boot", "has expired", true},
+		{"enterprise gate", "ws-server-1 | audit logging requires enterprise edition (current: pro). Upgrade at https://x", "Enterprise license", true},
+		{"unmatched", "ws-server-1 | listening on :8080\nvalkey-1 | Ready to accept connections", "", false},
+		{"empty", "", "", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			msg, ok := explainBootFailure(tc.logs)
+			if ok != tc.wantOK {
+				t.Fatalf("ok=%v, want %v (msg=%q)", ok, tc.wantOK, msg)
+			}
+			if tc.wantOK {
+				if !strings.Contains(msg, tc.wantHint) {
+					t.Errorf("explanation %q missing hint %q", msg, tc.wantHint)
+				}
+				if !strings.Contains(msg, "failed to start") {
+					t.Errorf("explanation %q missing the header + surfaced log line", msg)
+				}
+			}
+		})
+	}
+}
