@@ -185,6 +185,48 @@ func (m *Manager) IsRunning(ctx context.Context) bool {
 	return strings.TrimSpace(string(out)) != ""
 }
 
+// stackMarkerService is a Sukko-characteristic Compose service used to recognize a running Sukko
+// stack by its container labels, independent of the project name (which is the dir basename).
+const stackMarkerService = "ws-gateway"
+
+// parseStackDirs turns the newline-separated `docker ps` label output into a deduped, trimmed
+// list of project working directories (order preserved). Blank lines are dropped.
+func parseStackDirs(raw string) []string {
+	var dirs []string
+	seen := make(map[string]bool)
+	for line := range strings.SplitSeq(raw, "\n") {
+		dir := strings.TrimSpace(line)
+		if dir == "" || seen[dir] {
+			continue
+		}
+		seen[dir] = true
+		dirs = append(dirs, dir)
+	}
+	return dirs
+}
+
+// FindRunningStackDir reports the working directory of a Sukko stack running anywhere on this
+// machine (not only in the current directory), by reading the Compose project working_dir label
+// off the marker service's container. found is false when no Sukko stack is running. Detection is
+// best-effort: a Docker error (daemon down, not installed) is treated as "none running", like
+// IsRunning, so no error is returned.
+func (m *Manager) FindRunningStackDir(ctx context.Context) (dir string, found bool) {
+	// {{index .Labels "..."}} prints the project working_dir Compose stamps on every container.
+	cmd := exec.CommandContext(ctx, "docker", "ps",
+		"--filter", "label=com.docker.compose.service="+stackMarkerService,
+		"--format", `{{index .Labels "com.docker.compose.project.working_dir"}}`)
+
+	out, err := cmd.Output()
+	if err != nil {
+		return "", false
+	}
+	dirs := parseStackDirs(string(out))
+	if len(dirs) == 0 {
+		return "", false
+	}
+	return dirs[0], true
+}
+
 const healthPollInterval = 2 * time.Second
 
 // WaitForHealth polls docker compose ps until all named services report Health=="healthy".

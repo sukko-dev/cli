@@ -28,18 +28,22 @@ var statusCmd = &cobra.Command{
 
 		services, composeErr := mgr.Status(cmd.Context())
 
-		if output == "json" {
-			if composeErr != nil {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Docker Compose: not running (%v)\n", composeErr)
+		// A Compose error means there is no Sukko project in THIS directory — not that the stack
+		// is down. Report it honestly, once, and point at the running stack's directory if one
+		// exists elsewhere; the old blunt "not running" contradicted the live health probed below.
+		if composeErr != nil {
+			if dir, found := mgr.FindRunningStackDir(cmd.Context()); found {
+				fmt.Fprintf(cmd.ErrOrStderr(), "No Sukko Compose project in this directory — a stack is running in %s. Showing live health below.\n", dir)
 			} else {
-				return printJSON(services)
+				fmt.Fprintf(cmd.ErrOrStderr(), "No Sukko Compose project in this directory (%v).\n", composeErr)
 			}
 		}
 
-		// Table path — reuse the same result
-		if composeErr != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Docker Compose: not running (%v)\n", composeErr)
+		if output == "json" && composeErr == nil {
+			return printJSON(services)
 		}
+		// Otherwise fall through to the table (covers table mode, and json mode with no local
+		// Compose where we still show live health from the endpoint probes below).
 
 		var items []StatusItem
 		if len(services) > 0 {

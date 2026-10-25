@@ -219,3 +219,29 @@ func TestWaitForHealth_ContextCancelled(t *testing.T) {
 		t.Fatal("expected error from canceled context")
 	}
 }
+
+func TestParseStackDirs(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		raw  string
+		want []string
+	}{
+		{"empty", "", nil},
+		{"whitespace only", "  \n\t\n", nil},
+		{"single dir", "/home/me/trysukko\n", []string{"/home/me/trysukko"}},
+		{"trailing + blank lines", "/a/b\n\n  \n", []string{"/a/b"}},
+		{"duplicates collapse", "/a/b\n/a/b\n/a/b\n", []string{"/a/b"}},
+		{"two distinct dirs", "/a/b\n/c/d\n", []string{"/a/b", "/c/d"}},
+		{"surrounding spaces trimmed", "  /a/b  \n", []string{"/a/b"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := parseStackDirs(tc.raw)
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("parseStackDirs(%q) = %v, want %v", tc.raw, got, tc.want)
+			}
+		})
+	}
+}

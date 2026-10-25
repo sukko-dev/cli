@@ -25,6 +25,13 @@ var downCmd = &cobra.Command{
 		}
 
 		if !mgr.IsRunning(cmd.Context()) {
+			// Nothing in THIS directory's project. If a Sukko stack is running elsewhere, say so
+			// instead of the misleading "No services running" — `down` is scoped to the current
+			// directory, so the operator needs to know where the running stack actually lives.
+			if dir, found := mgr.FindRunningStackDir(cmd.Context()); found {
+				fmt.Fprintf(cmd.ErrOrStderr(), "No Sukko project in this directory. A Sukko stack is running in %s — run 'sukko down' from there.\n", dir)
+				return nil
+			}
 			fmt.Fprintln(cmd.OutOrStdout(), "No services running.")
 			return nil
 		}
